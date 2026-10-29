@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # ProfitPilot AI: working demo
 
 Agentic paper-trading bot. Virtual money only; no real orders are ever placed.
@@ -53,3 +54,6 @@ Restart app.py. The synthetic replay is recommended for judging because the stor
 | POST | /api/kill-switch | {"engaged": true} |
 | POST | /api/chaos | {"scenario": "flash_crash" \| "fake_news" \| "stale_data" \| "agent_failure"} |
 | GET | /api/backtest | |
+=======
+# profit-pilots-AI
+>>>>>>> d8193d16763b01b888ebbf503f4ab64f2c216a51

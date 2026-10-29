@@ -1,0 +1,207 @@
+/* ProfitPilot cockpit: navy instrument panel, cyan glass displays,
+   amber for caution, green/red only for go/stop meaning. */
+:root {
+  --bg: #0b1626;
+  --panel: #12233a;
+  --surface: #1a2f4b;
+  --line: #29426a;
+  --text: #e8eef6;
+  --muted: #8ea2bc;
+  --glass: #6fd3e6;
+  --amber: #f5b041;
+  --go: #4cc38a;
+  --stop: #ef5350;
+  --head: "Barlow Condensed", "Arial Narrow", "Roboto Condensed", sans-serif;
+  --body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.5 var(--body); }
+h1, h2, h3 { font-family: var(--head); font-weight: 600; margin: 0; letter-spacing: 0.01em; }
+p { margin: 0.25rem 0; }
+button, select { font: inherit; }
+:focus-visible { outline: 2px solid var(--glass); outline-offset: 2px; }
+
+.muted { color: var(--muted); }
+.up { color: var(--go); }
+.down { color: var(--stop); }
+.big-num { font-family: var(--head); font-size: 2.1rem; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1; }
+
+.boot { display: grid; place-content: center; min-height: 100vh; text-align: center; gap: 0.5rem; }
+.boot h1 { font-size: 2.5rem; }
+
+/* ---------- header ---------- */
+.header {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  gap: 1.5rem;
+  align-items: center;
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+.topbar { position: sticky; top: 0; z-index: 5; }
+.brand h1 { font-size: 1.9rem; line-height: 1; }
+.brand p { color: var(--glass); font-size: 0.85rem; margin: 0.2rem 0 0; }
+.flight { display: grid; gap: 0.3rem; max-width: 380px; }
+.paper-badge { color: var(--amber); font-weight: 600; font-size: 0.85rem; }
+.progress { height: 6px; background: var(--surface); border-radius: 3px; overflow: hidden; }
+.progress-fill { height: 100%; background: var(--glass); transition: width 0.3s; }
+.controls { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
+
+.btn {
+  background: var(--surface); color: var(--text); border: 1px solid var(--line);
+  padding: 0.45rem 0.85rem; border-radius: 6px; cursor: pointer;
+}
+.btn:hover:not(:disabled) { border-color: var(--glass); }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn-primary { background: var(--glass); color: #06202a; border-color: var(--glass); font-weight: 600; }
+.btn-ghost { background: transparent; }
+.speed { display: flex; gap: 0.4rem; align-items: center; color: var(--muted); }
+.speed select { background: var(--surface); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 0.35rem; }
+
+/* The one loud element: a guarded kill switch */
+.kill {
+  position: relative; display: flex; align-items: center; gap: 0.6rem;
+  padding: 0.55rem 1.1rem 0.55rem 0.6rem; border-radius: 8px; cursor: pointer;
+  border: 2px solid var(--stop); background: #2a1418; color: #ffd9d9;
+  font-family: var(--head); font-size: 1.15rem; font-weight: 700;
+}
+.kill-guard {
+  width: 34px; height: 34px; border-radius: 6px;
+  background: repeating-linear-gradient(-45deg, var(--stop) 0 6px, #1c0c0e 6px 12px);
+  box-shadow: inset 0 0 0 2px #1c0c0e;
+  transition: transform 0.25s;
+}
+.kill:hover .kill-guard { transform: rotate(-12deg); }
+.kill-on { background: var(--stop); color: #fff; }
+.kill-on .kill-guard { background: #fff; transform: rotate(-90deg); }
+@media (prefers-reduced-motion: reduce) { .kill-guard, .progress-fill { transition: none; } }
+
+.banner { padding: 0.6rem 1.5rem; font-weight: 600; }
+.banner-error { background: #3a1f12; color: var(--amber); }
+.banner-kill { background: var(--stop); color: #fff; }
+.is-killed .area-pipeline { opacity: 0.6; }
+
+/* ---------- layout ---------- */
+.grid {
+  display: grid; gap: 1rem; padding: 1rem 1.5rem;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  grid-template-areas:
+    "chart chart chart chart chart chart chart chart portfolio portfolio portfolio portfolio"
+    "pipeline pipeline pipeline pipeline pipeline pipeline pipeline pipeline pipeline pipeline pipeline pipeline"
+    "chaos chaos chaos chaos chaos journal journal journal journal journal journal journal"
+    "backtest backtest backtest backtest backtest backtest backtest backtest backtest backtest backtest backtest";
+}
+.area-chart { grid-area: chart; }
+.area-portfolio { grid-area: portfolio; }
+.area-pipeline { grid-area: pipeline; transition: opacity 0.2s; }
+.area-chaos { grid-area: chaos; }
+.area-journal { grid-area: journal; }
+.area-backtest { grid-area: backtest; }
+
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 1rem 1.1rem; min-width: 0; }
+.panel-head { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; margin-bottom: 0.75rem; flex-wrap: wrap; }
+.panel-head h2 { font-size: 1.35rem; }
+.empty { color: var(--muted); max-width: 60ch; }
+
+/* ---------- chart ---------- */
+.price-readout { display: flex; gap: 0.75rem; align-items: baseline; }
+.chart-box { height: 300px; }
+.chart-box-short { height: 240px; }
+.legend { display: flex; align-items: center; gap: 0.4rem; font-size: 0.8rem; margin-top: 0.4rem; }
+.leg { width: 0; height: 0; border-left: 6px solid transparent; border-right: 6px solid transparent; margin-left: 0.6rem; }
+.leg-buy { border-bottom: 10px solid var(--go); }
+.leg-sell { border-top: 10px solid var(--stop); }
+.leg-line { width: 18px; border-top: 2px dashed var(--stop); margin-left: 0.8rem; }
+
+/* ---------- account ---------- */
+.equity { display: grid; gap: 0.2rem; margin-bottom: 1rem; }
+.stats { display: grid; grid-template-columns: auto 1fr; gap: 0.35rem 1rem; margin: 0; }
+.stats dt { color: var(--muted); }
+.stats dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+.flags { list-style: none; padding: 0; margin: 1rem 0 0; display: grid; gap: 0.35rem; }
+.flags li { padding: 0.3rem 0.6rem; border-radius: 6px; border-left: 3px solid; background: var(--surface); }
+.flag-ok { border-color: var(--go); }
+.flag-warn { border-color: var(--amber); color: var(--amber); }
+.flag-bad { border-color: var(--stop); color: #ffb4b4; }
+
+/* ---------- pipeline ---------- */
+.pipeline { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: 1fr 2.4fr 1fr 1.4fr; gap: 0.75rem; }
+.stage { background: var(--surface); border-radius: 8px; padding: 0.75rem; border-top: 3px solid var(--line); min-width: 0; }
+.stage-ok { border-top-color: var(--go); }
+.stage-bad { border-top-color: var(--stop); }
+.stage h3 { font-size: 1.05rem; margin-bottom: 0.4rem; display: flex; gap: 0.5rem; align-items: baseline; }
+.step-no { color: var(--glass); font-size: 0.9rem; }
+.quarantine { color: var(--amber); font-size: 0.85rem; }
+.agents { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.5rem; }
+.agent { background: var(--panel); border-radius: 6px; padding: 0.6rem; font-size: 0.85rem; display: flex; flex-direction: column; gap: 0.3rem; }
+.agent header { display: flex; justify-content: space-between; align-items: center; }
+.agent p { flex: 1; }
+.agent-offline { opacity: 0.55; border: 1px dashed var(--amber); }
+.confidence { height: 4px; background: var(--line); border-radius: 2px; overflow: hidden; }
+.confidence div { height: 100%; background: var(--glass); }
+.chip { font-family: var(--head); font-weight: 700; padding: 0.05rem 0.5rem; border-radius: 4px; font-size: 0.95rem; }
+.chip-buy { background: var(--go); color: #062314; }
+.chip-sell { background: var(--stop); color: #fff; }
+.chip-hold { background: var(--line); color: var(--text); }
+.decision { display: flex; gap: 0.6rem; align-items: center; }
+.checks { list-style: none; padding: 0; margin: 0.4rem 0 0; font-size: 0.85rem; display: grid; gap: 0.2rem; }
+.check-ok span { color: var(--go); }
+.check-bad { color: #ffb4b4; }
+.check-bad span { color: var(--stop); }
+
+/* ---------- chaos ---------- */
+.score { display: flex; gap: 0.5rem; align-items: baseline; }
+.scenarios { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.5rem; }
+.scenario {
+  text-align: left; display: grid; gap: 0.2rem; padding: 0.7rem; border-radius: 8px; cursor: pointer;
+  background: var(--surface); color: var(--text); border: 1px solid var(--line); font-size: 0.85rem;
+}
+.scenario strong { font-family: var(--head); font-size: 1.1rem; color: var(--amber); }
+.scenario:hover:not(:disabled) { border-color: var(--amber); }
+.scenario:disabled { opacity: 0.5; cursor: progress; }
+.watching { color: var(--amber); margin-top: 0.6rem; }
+.results { list-style: none; padding: 0; margin: 0.75rem 0 0; display: grid; gap: 0.4rem; max-height: 220px; overflow: auto; }
+.results li { padding: 0.5rem 0.7rem; border-radius: 6px; background: var(--surface); border-left: 3px solid; font-size: 0.85rem; }
+.result-pass { border-color: var(--go); }
+.result-pass strong { color: var(--go); }
+.result-fail { border-color: var(--stop); }
+.result-fail strong { color: var(--stop); }
+
+/* ---------- journal ---------- */
+.journal { list-style: none; padding: 0; margin: 0; max-height: 420px; overflow: auto; display: grid; gap: 0.35rem; }
+.entry { display: grid; grid-template-columns: 4.6rem 2.8rem 1fr; gap: 0.5rem; padding: 0.4rem 0.2rem; border-bottom: 1px solid var(--line); font-size: 0.85rem; }
+.entry p { margin: 0; max-width: 80ch; }
+.entry-kind { font-family: var(--head); font-weight: 600; font-size: 0.95rem; }
+.entry-tick { color: var(--muted); font-variant-numeric: tabular-nums; }
+.entry-trade .entry-kind { color: var(--glass); }
+.entry-hold .entry-kind { color: var(--muted); }
+.entry-blocked .entry-kind, .entry-risk .entry-kind { color: var(--stop); }
+.entry-alert .entry-kind, .entry-chaos .entry-kind { color: var(--amber); }
+
+/* ---------- backtest ---------- */
+.backtest { display: grid; grid-template-columns: 2fr 1fr; gap: 1rem; align-items: start; }
+.backtest > p { grid-column: 1 / -1; max-width: 80ch; }
+.metrics { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.metrics th, .metrics td { padding: 0.45rem 0.5rem; border-bottom: 1px solid var(--line); text-align: right; }
+.metrics th:first-child { text-align: left; color: var(--muted); font-weight: 400; }
+.metrics thead th { font-family: var(--head); font-size: 1rem; color: var(--text); }
+
+.footer { padding: 0.5rem 1.5rem 1.5rem; color: var(--muted); font-size: 0.8rem; }
+
+/* ---------- responsive ---------- */
+@media (max-width: 1100px) {
+  .topbar { position: static; }
+  .header { grid-template-columns: 1fr auto; }
+  .flight, .controls { grid-column: 1 / -1; }
+  .grid { grid-template-areas: "chart" "portfolio" "pipeline" "chaos" "journal" "backtest"; grid-template-columns: 1fr; }
+  .pipeline { grid-template-columns: 1fr 1fr; }
+  .stage-agents { grid-column: 1 / -1; }
+  .backtest { grid-template-columns: 1fr; }
+}
+@media (max-width: 640px) {
+  .grid, .header { padding-left: 0.75rem; padding-right: 0.75rem; }
+  .pipeline, .agents, .scenarios { grid-template-columns: 1fr; }
+}

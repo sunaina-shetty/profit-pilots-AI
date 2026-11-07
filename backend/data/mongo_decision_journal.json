@@ -1,0 +1,66 @@
+[
+  {
+    "event_type": "CYCLE_DECISION",
+    "symbol": "RELIANCE.NS",
+    "price": 2865.2,
+    "decision": {
+      "action": "BUY",
+      "size_tier": "FULL",
+      "reason": "Unanimous Consensus (3/3): Trend, News, and Contrarian agree on BUY setup.",
+      "agent_votes": {
+        "trend": {
+          "vote": "BUY",
+          "confidence": 0.88
+        },
+        "news": {
+          "vote": "BUY",
+          "confidence": 0.82
+        },
+        "contrarian": {
+          "vote": "BUY",
+          "confidence": 0.7
+        }
+      }
+    },
+    "risk_verdict": {
+      "approved": true,
+      "qty": 35,
+      "stop_loss": 2822.2,
+      "reason": "Approved 1% equity risk sizing (35 shares, FULL tier)"
+    },
+    "plain_text": "EXECUTED BUY 35 shares of RELIANCE.NS at Rs 2865.20 with mandatory stop-loss at Rs 2822.20. Council consensus: Unanimous agreement across trend, news sentiment, and technical health.",
+    "timestamp": 1794046789.3351624,
+    "_id": "1794050389335_0"
+  },
+  {
+    "event_type": "CYCLE_DECISION",
+    "symbol": "RELIANCE.NS",
+    "price": 2894.5,
+    "decision": {
+      "action": "HOLD",
+      "size_tier": "ZERO",
+      "reason": "Disagreement detected (1 BUY, 1 SELL, 1 HOLD). Disagreement is a risk signal -> HOLD.",
+      "agent_votes": {
+        "trend": {
+          "vote": "BUY",
+          "confidence": 0.65
+        },
+        "news": {
+          "vote": "HOLD",
+          "confidence": 0.5
+        },
+        "contrarian": {
+          "vote": "SELL",
+          "confidence": 0.75
+        }
+      }
+    },
+    "risk_verdict": {
+      "approved": false,
+      "reason": "No actionable consensus (HOLD)"
+    },
+    "plain_text": "At Rs 2894.50, the council opted to HOLD RELIANCE.NS. Contrarian agent detected overbought resistance. Zero capital committed.",
+    "timestamp": 1794048589.335165,
+    "_id": "1794050389357_1"
+  }
+]

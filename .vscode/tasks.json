@@ -1,0 +1,43 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "1. Start Backend (All 9 Services)",
+      "type": "shell",
+      "command": "python backend/run_all.py",
+      "problemMatcher": [],
+      "isBackground": true,
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "group": "profitpilot"
+      }
+    },
+    {
+      "label": "2. Start Frontend Cockpit",
+      "type": "shell",
+      "command": "cd frontend && npm run dev",
+      "problemMatcher": [],
+      "isBackground": true,
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "group": "profitpilot"
+      }
+    },
+    {
+      "label": "Run ProfitPilot AI (Full Stack)",
+      "dependsOn": [
+        "1. Start Backend (All 9 Services)",
+        "2. Start Frontend Cockpit"
+      ],
+      "dependsOrder": "parallel",
+      "problemMatcher": [],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      }
+    }
+  ]
+}
+

@@ -34,14 +34,100 @@ def resample_to_5min(candles_1m: List[Dict[str, Any]]) -> pd.DataFrame:
         
     return pd.DataFrame(bars_5m)
 
+
+def compute_vwap_sigma_from_series(df_curr_5m: pd.DataFrame, vwap_series: pd.Series) -> float:
+    """
+    D: Compute sigma = std(close - VWAP) over all bars so far today.
+    Requires >= 3 bars for a meaningful value.
+    """
+    if len(df_curr_5m) < 3:
+        return 0.0
+    deviations = df_curr_5m["close"].values - vwap_series.values
+    return float(np.std(deviations, ddof=1)) if len(deviations) >= 2 else 0.0
+
+
+def compute_adx(df: pd.DataFrame, period: int = 14) -> float:
+    """
+    E: ADX14 on the given OHLC DataFrame. Returns the latest ADX value.
+    Uses Wilder's smoothing (same as standard ADX). Safe for any bar count.
+    """
+    n = len(df)
+    if n < period + 1:
+        return 0.0
+
+    highs = df["high"].values.astype(float)
+    lows = df["low"].values.astype(float)
+    closes = df["close"].values.astype(float)
+
+    plus_dm = np.zeros(n)
+    minus_dm = np.zeros(n)
+    tr = np.zeros(n)
+
+    for i in range(1, n):
+        up = highs[i] - highs[i - 1]
+        down = lows[i - 1] - lows[i]
+        plus_dm[i] = up if (up > down and up > 0) else 0.0
+        minus_dm[i] = down if (down > up and down > 0) else 0.0
+        tr[i] = max(
+            highs[i] - lows[i],
+            abs(highs[i] - closes[i - 1]),
+            abs(lows[i] - closes[i - 1]),
+        )
+
+    # Wilder smoothing with safe zero handling
+    def wilder_smooth(arr, p):
+        s = np.zeros(n)
+        if n > p:
+            s[p] = np.sum(arr[1:p + 1])
+            for i in range(p + 1, n):
+                s[i] = s[i - 1] - (s[i - 1] / p) + arr[i]
+        return s
+
+    atr_s = wilder_smooth(tr, period)
+    pdm_s = wilder_smooth(plus_dm, period)
+    mdm_s = wilder_smooth(minus_dm, period)
+
+    with np.errstate(divide='ignore', invalid='ignore'):
+        pdi = np.where(atr_s > 0, 100.0 * pdm_s / (atr_s + 1e-9), 0.0)
+        mdi = np.where(atr_s > 0, 100.0 * mdm_s / (atr_s + 1e-9), 0.0)
+        sum_di = pdi + mdi
+        dx = np.where(sum_di > 0, 100.0 * np.abs(pdi - mdi) / (sum_di + 1e-9), 0.0)
+        dx = np.nan_to_num(dx)
+
+    if n <= period:
+        return 0.0
+    if n <= 2 * period:
+        # If between period and 2*period, take mean of dx
+        valid_dx = dx[period:]
+        return float(np.mean(valid_dx)) if len(valid_dx) > 0 else 0.0
+
+    adx_s = np.zeros(n)
+    adx_s[2 * period] = np.mean(dx[period : 2 * period + 1])
+    for i in range(2 * period + 1, n):
+        adx_s[i] = (adx_s[i - 1] * (period - 1) + dx[i]) / period
+
+    return float(np.nan_to_num(adx_s[-1]))
+
+
 def compute_indicators(prior_day_1m: List[Dict[str, Any]], current_day_1m: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
-    Computes EMA9, EMA21, RSI14, ATR14, VWAP (resets daily), and Bollinger %B on closed 5-minute bars.
+    Computes EMA9, EMA21, RSI14, ATR14, VWAP (resets daily), Bollinger %B,
+    VWAP sigma, and ADX14 on closed 5-minute bars.
     Returns the latest indicator values and historical series for decision rules.
+    If current_day_1m already contains 5-min bars (from real data fetch), it is
+    used directly without resampling.
     """
-    # 1. Combine prior day + current day to warm up indicators
-    df_prior_5m = resample_to_5min(prior_day_1m)
-    df_curr_5m = resample_to_5min(current_day_1m)
+    # Auto-detect: if input has fewer than 376 bars it's already 5m bars
+    if prior_day_1m and len(prior_day_1m) <= 80:
+        # Already 5m bars — treat as-is
+        df_prior_5m = _candle_list_to_df(prior_day_1m)
+    else:
+        df_prior_5m = resample_to_5min(prior_day_1m)
+
+    if current_day_1m and len(current_day_1m) <= 80:
+        df_curr_5m = _candle_list_to_df(current_day_1m)
+    else:
+        df_curr_5m = resample_to_5min(current_day_1m)
     
     if df_curr_5m.empty:
         return {}
@@ -114,6 +200,12 @@ def compute_indicators(prior_day_1m: List[Dict[str, Any]], current_day_1m: List[
         else:
             break
 
+    # D: VWAP sigma
+    vwap_sigma = compute_vwap_sigma_from_series(df_curr_5m, curr_vwap_series)
+
+    # E: ADX14 computed on df_all (warmed up from prior day)
+    adx_val = compute_adx(df_all, period=14)
+
     return {
         "price": current_price,
         "ema9": round(ema9_val, 2),
@@ -124,6 +216,27 @@ def compute_indicators(prior_day_1m: List[Dict[str, Any]], current_day_1m: List[
         "pct_b": round(pct_b_val, 3),
         "price_30m_ago": round(price_30m_ago, 2),
         "closes_below_vwap_count": closes_below_vwap,
-        "bars_count": len(df_curr_5m)
+        "bars_count": len(df_curr_5m),
+        "vwap_sigma": round(vwap_sigma, 4),
+        "adx": round(adx_val, 2),
+        # Expose DataFrames for ORB/regime use (not serialized to JSON)
+        "_df_curr_5m": df_curr_5m,
+        "_vwap_series": curr_vwap_series,
     }
 
+
+def _candle_list_to_df(candles: List[Dict[str, Any]]) -> pd.DataFrame:
+    """Convert a list of candle dicts to a DataFrame with standard columns."""
+    if not candles:
+        return pd.DataFrame()
+    rows = []
+    for c in candles:
+        rows.append({
+            "time": c.get("time", ""),
+            "open": float(c.get("open", 0)),
+            "high": float(c.get("high", 0)),
+            "low": float(c.get("low", 0)),
+            "close": float(c.get("close", 0)),
+            "volume": float(c.get("volume", 0)),
+        })
+    return pd.DataFrame(rows)

@@ -47,6 +47,11 @@ MAX_BUYS_PER_DAY = 5
 DAILY_LOSS_LIMIT_PCT = 0.02     # 2% of initial amount
 STOP_LOSS_COOLDOWN_MINUTES = 30 # 30 min cooldown after stop loss hit
 
+# C: ORB + VWAP Agent settings
+ORB_IN_PLAY_VOLUME_MULTIPLIER = float(os.getenv("ORB_IN_PLAY_VOLUME_MULTIPLIER", "1.0" if os.getenv("OFFLINE", "0") == "1" else "1.5"))
+ORB_ENTRY_WINDOW_END = "11:30"          # max time for ORB entry
+ORB_TRAILING_ATR_MULTIPLIER = 2.0       # trailing stop = highest - 2 * ATR14
+
 # LLM Configuration
 LLM_BASE_URL = os.getenv("LLM_BASE_URL", "https://api.groq.com/openai/v1")
 LLM_API_KEY = os.getenv("LLM_API_KEY", "")

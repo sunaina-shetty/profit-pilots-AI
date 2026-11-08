@@ -67,18 +67,23 @@ npm run dev
 
 ---
 
-## 🧪 Automated Pytest Verification
+## 🧪 Automated Pytest Verification & Quant Evaluation
 
-To run the complete test suite:
+### 1. Run Complete Test Suite (30 Tests)
 ```bash
 python -m pytest tests/ -v
 ```
-All 8 test suites pass:
-- Intraday generator properties (touches OHLC exactly, sums volume, reproducible).
-- Broker authorization key protection.
-- Stop-loss execution & gap-down open fill.
-- Position sizing formula.
-- Kill switch & 2% daily loss limit circuit breaker.
-- News agent time-fencing & sentiment scoring.
-- Decision consensus rules.
-- 12 full simulated trading days (asserts no crashes, books reconcile, bot trades on >= 50% of days).
+All 30 tests pass covering:
+- A: Zero-quantity guards, correct journal sequencing, and round-trip cash/equity reconciliation.
+- B: Real 5-minute data detection, synthetic fallback banners, and no-lookahead next-open fills.
+- C: Agent 1 ORB + VWAP trend breakout, opening volume threshold, trailing ATR stop, and noise warnings.
+- D: Agent 3 VWAP $\pm 2\sigma$ mean reversion, trend vetoes on overheated prices, thesis-broken exits, and 90-min time stops.
+- E: Market regime detection (TREND / RANGE / UNCLEAR) and Council consensus gating.
+- F: Cost filter preventing trades where expected moves are $< 3\times$ round-trip fees.
+- G: Continuous 5-minute candlestick chart, trade-connection overlays, execution marker lifecycle, and SSE real-time streaming endpoint.
+
+### 2. Run Headless Strategy Benchmark
+```bash
+python evaluate.py --symbols TCS,RELIANCE,INFY,HDFCBANK,ICICIBANK --days 30
+```
+Runs an out-of-sample quant benchmark comparing Agent 1, Agent 3, and the Combined Council across 30 days and 5 major stocks, printing win rates, average $R$, profit factors, net P&L after fees, and max drawdown.

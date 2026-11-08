@@ -1,209 +1,84 @@
 # ProfitPilot AI ✈️
 > **"Fly for profit. Land safe."**  
-> Problem Statement **PS-02**: Agentic Paper-Trading Bot by Team **Profit Pilots**.
+> Problem Statement **PS-02**: Simple Agentic Paper-Trading Simulator (React + Flask).
 
 ---
 
-## 🌟 Executive Summary & Differentiator
+## 🌟 Overview & Key Assumptions
 
-Most trading bots promise unrealistic returns while ignoring retail ruin risk: emotional revenge trading, rumor-chasing, lack of stop-losses, and opaque black-box decisions.
+ProfitPilot AI is a focused, beginner-friendly **intraday paper-trading simulator** designed for Problem Statement **PS-02**. It simulates an entire Indian equity trading session (09:15 to 15:30 IST) at **50x speed** (1-minute candle per 1.2s, completing a full session in ~7.5 minutes).
 
-**ProfitPilot AI** is built on **trust, safety, and explainability**:
-- **Autonomous Intraday Paper-Trading**: 100% virtual funds, zero real-money broker risks.
-- **Independent 16-Rule Deterministic Risk Manager**: Final veto authority over all orders. ZERO AI or LLM dependencies.
-- **Mandatory Cryptographic Approval Tokens**: The virtual exchange rejects any order without a signed HMAC-SHA256 token issued by the Risk Manager.
-- **Daily Loss Limit Circuit Breaker**: Halts trading the moment daily drawdown reaches 2% of start-of-day equity.
-- **Hardware-Style Emergency Kill Switch**: Operates independently even if all AI agents and upstream APIs are offline.
-- **Plain-Language Explainability Journal**: Every action, consensus vote, and veto is written in transparent natural language.
-- **Chaos & Self-Attack Lab**: 11 simulated system shocks and adversarial tests with a real-time **Safety Score**.
-
----
-
-## 🏛️ System Architecture
-
-```
-                    ┌──────────────────────────────────────────────┐
-                    │      React Frontend (Vite + Recharts)       │
-                    │   Cockpit | Risk | Journal | Backtest | Chaos │
-                    └──────────────────────┬───────────────────────┘
-                                           │ SSE & REST (Port 5000)
-                                           ▼
-┌────────────────────────────────────────────────────────────────────────────────────────┐
-│                                  API GATEWAY (Port 5000)                              │
-│             Orchestrates Autonomous Loop (4s) • Streams Real-time SSE Events           │
-└───────┬───────────────────────────┬───────────────────────────┬──────────────────────┬─┘
-        │                           │                           │                      │
-        ▼                           ▼                           ▼                      ▼
-┌──────────────┐          ┌───────────────────┐       ┌──────────────────┐    ┌───────────────┐
-│ DATA SERVICE │          │  AGENTS SERVICE   │       │ DECISION SERVICE │    │  JOURNAL SVC  │
-│  Port 5001   │          │     Port 5002     │       │    Port 5003     │    │   Port 5006   │
-├──────────────┤          ├───────────────────┤       ├──────────────────┤    ├───────────────┤
-│ • yfinance   │          │ • Trend (EMA/RSI) │       │ Consensus Engine │    │ MongoDB/JSON  │
-│ • Sim feed   │          │ • News Sentiment  │       │ • 3/3 -> FULL    │    │ Plain-text    │
-│ • Staleness  │          │ • Contrarian Mean │       │ • 2/3 -> HALF    │    │ explainable   │
-│   Gate       │          │   Reversion       │       │ • <2/3 -> HOLD   │    │ audit logs    │
-└──────────────┘          └───────────────────┘       └──────────────────┘    └───────────────┘
-                                                                │
-                                                                ▼
-                                                      ┌──────────────────┐
-                                                      │   RISK SERVICE   │
-                                                      │    Port 5004     │
-                                                      ├──────────────────┤
-                                                      │ • ZERO AI/LLM    │
-                                                      │ • 16 Rules Veto  │
-                                                      │ • 1% Equity Risk │
-                                                      │ • 2% Daily Halt  │
-                                                      │ • Kill Switch    │
-                                                      │ • HMAC Tokens    │
-                                                      └────────┬─────────┘
-                                                               │ (Signed Token)
-                                                               ▼
-                                                      ┌──────────────────┐
-                                                      │ EXCHANGE SERVICE │
-                                                      │    Port 5005     │
-                                                      ├──────────────────┤
-                                                      │ • MySQL / SQLite │
-                                                      │ • Slippage (5bp) │
-                                                      │ • Fees (0.03%)   │
-                                                      │ • SL/TP Monitor  │
-                                                      └──────────────────┘
-```
+### Key Architectural Assumptions:
+1. **Virtual Money Only**: 100% simulated paper trading using entered virtual cash (default ₹1,00,000). There are zero real broker connections.
+2. **Deterministic Risk Protection (Zero AI in Risk Path)**:
+   - Position sizing strictly enforced: `qty = min( 1% of amount ÷ (price x stop-loss%), 50% of amount ÷ price ) * multiplier`.
+   - Mandatory stop-loss evaluated on every 1-minute candle: if `low <= stop`, exits at `min(open, stop)`.
+   - Hard safety rule: 2% daily loss limit halts trading immediately.
+   - 30-minute cooldown after any stop-loss hit.
+   - Maximum 5 buys per day.
+   - 15:15 IST mandatory intraday square-off.
+   - Only the Risk Module holds the private execution key; agents can never execute directly.
+3. **No Lookahead**: Agents make decisions on closed 5-minute bars (09:30, 09:35 ... 15:10). Decisions fill at the OPEN of the next candle with 2 bps slippage.
+4. **Honest Market Feeds**:
+   - Real daily OHLC is pulled via `yfinance` for the selected NSE symbol and date.
+   - Intraday path (375 1-minute candles) is generated with a Brownian-bridge generator (seed = symbol + date) that touches Open, Close, High, and Low exactly with U-shaped volume.
+   - If offline or external API fails, seeded demo prices are used and clearly tagged `"OFFLINE DEMO DATA"`. Normal runs are labeled `"REAL DAILY BAR -> SIMULATED INTRADAY PATH"`.
+5. **LLM Explainability (Free Tier Compatible)**:
+   - The LLM rewrites trading decisions into 2–4 plain sentences for beginners in a background thread pool (max 3 workers).
+   - The simulation never waits for the LLM; template sentences appear immediately and are updated asynchronously.
+   - All numbers generated by the LLM are fact-checked against the record before being accepted. If no API key is provided, deterministic beginner templates are used seamlessly.
 
 ---
 
-## 📁 Repository Structure
+## 🚀 How to Run
 
-```
-profitpilot-ai/
-├── backend/
-│   ├── shared/
-│   │   ├── config.py             # Config & risk parameters (no magic numbers)
-│   │   ├── schemas.py            # Pydantic data schemas & message models
-│   │   ├── db.py                 # MySQL (SQLAlchemy) + MongoDB with local fallback
-│   │   └── token_utils.py        # HMAC-SHA256 risk approval token generator & verifier
-│   ├── services/
-│   │   ├── data_service/         # Port 5001: Market prices, mock feeds, staleness flags
-│   │   ├── agents_service/       # Port 5002: Trend, News, and Contrarian independent agents
-│   │   ├── decision_service/     # Port 5003: Consensus voting & size tier resolution
-│   │   ├── risk_service/         # Port 5004: Independent Risk Manager (Zero AI)
-│   │   ├── exchange_service/     # Port 5005: Mock exchange with fees, slippage, and PnL
-│   │   ├── journal_service/      # Port 5006: Plain-language explainability audit logs
-│   │   ├── backtest_service/     # Port 5007: Historical strategy simulator vs Buy & Hold
-│   │   ├── chaos_service/        # Port 5008: 11 Adversarial chaos scenarios & Safety Score
-│   │   └── gateway/              # Port 5000: Trading loop orchestrator & SSE event bus
-│   ├── scripts/
-│   │   ├── init_db.py            # Schema migration for SQL & MongoDB
-│   │   └── seed_demo.py          # Seeds initial capital and demo journal history
-│   ├── tests/
-│   │   ├── test_risk_manager.py  # 16 risk rules, sizing formula, kill switch tests
-│   │   ├── test_decision.py      # Consensus & size tier aggregation unit tests
-│   │   ├── test_exchange.py      # Virtual execution, fees, slippage, token tests
-│   │   └── test_chaos.py         # Self-attack & resilience tests
-│   ├── run_all.py                # Starts all 9 microservices simultaneously
-│   └── requirements.txt
-├── frontend/
-│   ├── src/
-│   │   ├── components/           # PriceChart, AgentCouncil, LossLimitMeter, KillSwitchModal
-│   │   ├── pages/                # Cockpit, RiskManager, Journal, Backtest, ChaosLab
-│   │   ├── services/api.js       # Real-time SSE listener & REST client
-│   │   ├── App.jsx
-│   │   ├── main.jsx
-│   │   └── index.css
-│   ├── package.json
-│   └── vite.config.js
-├── docker-compose.yml            # MySQL 8.0 + MongoDB 6.0 services
-├── .env.example                  # Documented environment variables
-└── README.md
-```
-
----
-
-## 🚀 How to Run (Step-by-Step)
-
-### Option 1: Quickstart (Zero Configuration)
-The backend automatically detects if MySQL and MongoDB are running; if not, it automatically runs on local SQLite and document JSON databases with zero extra setup.
-
-#### Step 1: Start Backend Services
-Open your terminal and run:
+### Step 1: Start Backend (Terminal 1)
 ```bash
-python backend/run_all.py
+python app.py
 ```
-*This starts all 9 microservices and passes all health checks on ports 5000–5008.*
+*Starts the single-process Flask backend on `http://localhost:5000`.*
 
-#### Step 2: Start Frontend Dashboard
-Open a second terminal and run:
+### Step 2: Start Frontend (Terminal 2)
 ```bash
 cd frontend
 npm run dev
 ```
-Open **`http://localhost:5173`** in your browser.
+*Opens the Vite dev server on `http://localhost:5173`.*
+
+> **In Antigravity IDE**: You can simply press **<kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>B</kbd>** to start both in parallel!
 
 ---
 
-### Option 2: Docker Compose for MySQL & MongoDB (Optional)
-If you want to run standalone MySQL and MongoDB servers:
+## 🧭 Step-by-Step Demo Walkthrough
+
+1. Open **`http://localhost:5173`** in your browser.
+2. Select **TCS** (or pick any of the ~15 NSE stocks, or type a custom symbol).
+3. Set your starting virtual capital (default: ₹1,00,000) and Stop-Loss % (default: 1.0%).
+4. Click **`START`**:
+   - Watch the price chart fill from left to right across the full day (09:15 to 15:30 IST).
+   - Observe the 3 Agent cards (Trend, News, Contrarian) update every 5 simulated minutes with pills, confidence %, and reasons.
+   - When a BUY occurs, a green ▲ appears on the chart and a dashed red line shows your active stop-loss level.
+   - When sold, a red ▼ appears with realized profit/loss.
+5. **Emergency Kill Switch**:
+   - Click the red **`KILL`** button at any time.
+   - A dialog asks *"Are you sure?"*. Upon confirming, all open positions are sold at market price immediately, status becomes `KILLED`, and simulation halts.
+6. **Session Summary**:
+   - When 15:30 is reached (or after KILL), a summary card displays total trades, win rate, net P&L after fees, and compares it against the Buy & Hold benchmark.
+
+---
+
+## 🧪 Automated Pytest Verification
+
+To run the complete test suite:
 ```bash
-docker-compose up -d
-python backend/scripts/init_db.py
-python backend/run_all.py
+python -m pytest tests/ -v
 ```
-
----
-
-## 🧪 Testing & Verification
-
-Run the full automated test suite:
-```bash
-python -m pytest backend/tests -v
-```
-All 15 automated tests for risk rules, consensus decisions, exchange fills, and chaos resilience pass with 100% coverage.
-
----
-
-## 🏆 Problem Statement PS-02 Compliance Checklist
-
-| Requirement | Implementation Module | Verification Status |
-|:---|:---|:---:|
-| **Paper-Trading Only** | `backend/services/exchange_service/app.py` | ✅ Virtual fills only |
-| **Independent Risk Manager** | `backend/services/risk_service/app.py` | ✅ Zero AI/LLM imports |
-| **1% Equity Risk Per Trade** | `backend/services/risk_service/app.py` | ✅ Qty = (1% Equity) / SL Distance |
-| **Mandatory Stop-Loss** | `backend/services/risk_service/app.py` | ✅ Orders without SL rejected |
-| **Daily Loss Limit Circuit Breaker** | `backend/services/risk_service/app.py` | ✅ Halts trading at 2% SOD drawdown |
-| **Cryptographic Order Token** | `backend/shared/token_utils.py` | ✅ HMAC-SHA256 signature required |
-| **Emergency Kill Switch** | `backend/services/risk_service/app.py` | ✅ SQL state, closes all positions |
-| **3 Independent Agents** | `backend/services/agents_service/app.py` | ✅ Trend, News, Contrarian |
-| **Consensus Sizing Tier** | `backend/services/decision_service/app.py` | ✅ 3/3 FULL, 2/3 HALF, <2/3 HOLD |
-| **Disagreement = Risk Signal** | `backend/services/decision_service/app.py` | ✅ Enforces HOLD on disagreement |
-| **Staleness Detection (NO_TRADE)** | `backend/services/data_service/app.py` | ✅ Price > 60s, News > 300s vetoed |
-| **Plain-Language Explainability** | `backend/services/journal_service/app.py` | ✅ Every decision explained |
-| **Backtest vs Buy-and-Hold** | `backend/services/backtest_service/app.py` | ✅ Compares MDD, Sharpe, Win Rate |
-| **Weak Periods Disclosed** | `backend/services/backtest_service/app.py` | ✅ Highlights choppy drawdowns |
-| **Chaos Lab (10+ Scenarios)** | `backend/services/chaos_service/app.py` | ✅ 11 Scenarios & Safety Score |
-| **Real-Time Live Cockpit** | `frontend/src/pages/Cockpit.jsx` | ✅ Live chart, markers, SSE stream |
-
----
-
-## 🛡️ Hackathon Judge Demo Walkthrough
-
-1. **Live Cockpit**:
-   - Open `http://localhost:5173`.
-   - Click **"Start Auto Loop"** — watch the live price chart update every few seconds with color-coded BUY (green), SELL (red), and HOLD markers.
-   - Hover over any marker to inspect the exact reasoning and individual agent votes.
-
-2. **Test the Guardrails Live**:
-   - Click **"Demo Shocks"** in the top right.
-   - Trigger **"Flash Crash (-8%)"** — observe how the risk manager avoids panic buying.
-   - Trigger **"Inject Stale Feed"** — observe the purple **"DATA STALE (NO_TRADE)"** safety banner instantly engage.
-
-3. **Emergency Kill Switch**:
-   - Click the big red **"EMERGENCY KILL SWITCH"** button.
-   - Confirm in the dialog. The entire cockpit instantly flips to **"KILLED"** state, flattening open positions and locking orders.
-   - Click **"RESUME TRADING"** to restore normal flight.
-
-4. **Audit Journal**:
-   - Navigate to the **Audit Journal** tab to view transparent, plain-language logs explaining every single decision made by the AI council.
-
-5. **Chaos Lab**:
-   - Open the **Chaos Lab** tab and click **"Run All 11 Chaos Tests"**.
-   - Watch all 11 scenarios verify in real-time to generate the **Safety Score: 11 of 11 handled safely (100%)**.
-
+All 8 test suites pass:
+- Intraday generator properties (touches OHLC exactly, sums volume, reproducible).
+- Broker authorization key protection.
+- Stop-loss execution & gap-down open fill.
+- Position sizing formula.
+- Kill switch & 2% daily loss limit circuit breaker.
+- News agent time-fencing & sentiment scoring.
+- Decision consensus rules.
+- 12 full simulated trading days (asserts no crashes, books reconcile, bot trades on >= 50% of days).

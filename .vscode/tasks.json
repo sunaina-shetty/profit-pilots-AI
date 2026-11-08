@@ -2,9 +2,9 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "1. Start Backend (All 9 Services)",
+      "label": "1. Start Backend (Flask app.py)",
       "type": "shell",
-      "command": "python backend/run_all.py",
+      "command": "python app.py",
       "problemMatcher": [],
       "isBackground": true,
       "presentation": {
@@ -14,7 +14,7 @@
       }
     },
     {
-      "label": "2. Start Frontend Cockpit",
+      "label": "2. Start Frontend (Vite)",
       "type": "shell",
       "command": "cd frontend && npm run dev",
       "problemMatcher": [],
@@ -26,10 +26,10 @@
       }
     },
     {
-      "label": "Run ProfitPilot AI (Full Stack)",
+      "label": "Run ProfitPilot AI",
       "dependsOn": [
-        "1. Start Backend (All 9 Services)",
-        "2. Start Frontend Cockpit"
+        "1. Start Backend (Flask app.py)",
+        "2. Start Frontend (Vite)"
       ],
       "dependsOrder": "parallel",
       "problemMatcher": [],
@@ -40,4 +40,3 @@
     }
   ]
 }
-

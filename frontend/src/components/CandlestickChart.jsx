@@ -41,7 +41,11 @@ export default function CandlestickChart({
   showStopLoss = true,
   setShowStopLoss,
   showHoldSignals = false,
-  setShowHoldSignals
+  setShowHoldSignals,
+  selectedTimeframe = '5m',
+  onSelectTimeframe,
+  simulationSpeed = '20x',
+  onSelectSpeed
 }) {
   const chartContainerRef = useRef(null);
   const chartRef = useRef(null);
@@ -488,6 +492,76 @@ export default function CandlestickChart({
 
   return (
     <div className="flex flex-col gap-2">
+      {/* Timeframe & Simulation Speed Toolbar */}
+      <div className="flex flex-wrap items-center justify-between gap-2 bg-[#0b0e14] px-3 py-2 rounded-lg border border-[#1f293d] text-xs">
+        {/* Timeframe Options (5 min, 15 min, 1 hour, 1 day, 1 week, 1 month) */}
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mr-1 hidden sm:inline">
+            Timeframe:
+          </span>
+          {[
+            { id: '5m', label: '5 min', short: '5m' },
+            { id: '15m', label: '15 min', short: '15m' },
+            { id: '1h', label: '1 hour', short: '1h' },
+            { id: '1d', label: '1 day', short: '1D' },
+            { id: '1w', label: '1 week', short: '1W' },
+            { id: '1mo', label: '1 month', short: '1M' }
+          ].map((tf) => {
+            const isActive = selectedTimeframe === tf.id;
+            return (
+              <button
+                key={tf.id}
+                type="button"
+                onClick={() => onSelectTimeframe && onSelectTimeframe(tf.id)}
+                className={`px-2.5 py-1 rounded text-[11px] font-bold transition-all flex items-center gap-1 ${
+                  isActive
+                    ? 'bg-[#00c896] text-black font-black shadow-md shadow-emerald-950/60 ring-1 ring-emerald-400'
+                    : 'bg-[#141b29] text-slate-400 hover:text-white hover:bg-slate-800 border border-[#1f293d]'
+                }`}
+                title={`Switch chart timeframe to ${tf.label}`}
+              >
+                <span>{tf.label}</span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Simulation Speed Buttons (1x, 5x, 10x, 20x, 50x) */}
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mr-1 hidden sm:inline">
+            Simulation Speed:
+          </span>
+          {[
+            { id: '1x', label: '1x' },
+            { id: '5x', label: '5x' },
+            { id: '10x', label: '10x' },
+            { id: '20x', label: '20x' },
+            { id: '50x', label: '50x' }
+          ].map((sp) => {
+            const isActive = (simulationSpeed || '').toLowerCase() === sp.id.toLowerCase();
+            const is20x = sp.id === '20x';
+            return (
+              <button
+                key={sp.id}
+                type="button"
+                onClick={() => onSelectSpeed && onSelectSpeed(sp.id)}
+                className={`px-2 py-0.5 rounded text-[11px] font-extrabold transition-all flex items-center gap-1 ${
+                  isActive
+                    ? 'bg-amber-400 text-black shadow-md shadow-amber-950/50 ring-1 ring-amber-300'
+                    : is20x
+                    ? 'bg-amber-950/60 text-amber-300 border border-amber-500/50 hover:bg-amber-900/50'
+                    : 'bg-[#141b29] text-slate-400 hover:text-white hover:bg-slate-800 border border-[#1f293d]'
+                }`}
+                title={`Set simulation replay speed to ${sp.label}`}
+              >
+                {is20x && <span>⚡</span>}
+                <span>{sp.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
       {/* Optional Indicators & Toggles Bar */}
       <div className="flex flex-wrap items-center justify-between gap-2 bg-[#0d1424] px-3 py-2 rounded-lg border border-[#1e293b] text-xs">
         {/* Candle Colors Legend */}

@@ -61,7 +61,7 @@ export default function TopMarketBar({
       return (
         <span className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-950/80 text-emerald-400 border border-emerald-500/40 animate-pulse">
           <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-          SIMULATION ACTIVE ({state?.simulated_time || '09:15'})
+          SIMULATION ACTIVE ({state?.simulated_time || '09:15'} • {state?.speed || '20X'})
         </span>
       );
     }

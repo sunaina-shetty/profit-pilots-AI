@@ -91,13 +91,14 @@ class TradingConfig:
     lot_size: int = 1
     slippage_bps: float = 0.0002           # 2 bps slippage on market fills
 
-    # --- Fee Model ---
-    brokerage_pct: float = 0.0003          # 0.03%
-    brokerage_max: float = 20.0            # ₹20 cap
-    stt_sell_pct: float = 0.00025          # 0.025% on sell turnover
-    exchange_txn_pct: float = 0.00003      # 0.003% of turnover
-    gst_pct: float = 0.18                  # 18% on (brokerage + exchange)
-    stamp_duty_buy_pct: float = 0.00003    # 0.003% on buy turnover
+    # --- Fee Model (Bot fee removed: zero trading fee) ---
+    enable_fees: bool = False              # Bot fees for trades removed
+    brokerage_pct: float = 0.0             # Zero brokerage fee
+    brokerage_max: float = 0.0             # ₹0 cap
+    stt_sell_pct: float = 0.0              # 0%
+    exchange_txn_pct: float = 0.0          # 0%
+    gst_pct: float = 0.0                   # 0%
+    stamp_duty_buy_pct: float = 0.0        # 0%
 
     # --- Optional Per-Symbol Overrides ---
     per_symbol_overrides: Dict[str, Dict[str, Any]] = field(default_factory=dict)

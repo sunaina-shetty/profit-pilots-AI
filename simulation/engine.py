@@ -43,7 +43,7 @@ class SimulationEngine:
     Replays 5-minute bars with continuous graded multi-agent scoring and council execution.
     """
     def __init__(self):
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()
         self.thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
 
@@ -66,7 +66,8 @@ class SimulationEngine:
         self.prior_day_1m: List[Dict[str, Any]] = []
         self.all_news: List[Dict[str, Any]] = []
         self.current_index = 0
-        self.speed_sleep = 6.0
+        self.speed = "20x"
+        self.speed_sleep = 0.3
 
         # ORB & Strategy tracking
         self.orb_entry_done = False
@@ -96,6 +97,38 @@ class SimulationEngine:
         # Order queues for NO LOOKAHEAD execution (decided at T, fills at T+1 open)
         self.pending_order: Optional[Dict[str, Any]] = None
 
+    def set_speed(self, speed: Any = "20x", fast_mode: bool = False) -> float:
+        """Sets simulation speed (e.g. 1x, 5x, 10x, 20x, 50x, 100x, MAX)."""
+        with self.lock:
+            if fast_mode:
+                self.speed = "MAX"
+                self.speed_sleep = 0.0
+                return 0.0
+
+            speed_str = str(speed).strip().lower()
+            preset_map = {
+                "1x": 3.0,
+                "5x": 1.2,
+                "10x": 0.6,
+                "20x": 0.3,
+                "50x": 0.12,
+                "100x": 0.04,
+                "max": 0.01
+            }
+            if speed_str in preset_map:
+                self.speed = speed_str.upper()
+                self.speed_sleep = preset_map[speed_str]
+            else:
+                try:
+                    num = float(speed_str.replace("x", ""))
+                    self.speed = f"{int(num) if num.is_integer() else num}x"
+                    self.speed_sleep = max(0.01, round(6.0 / max(1.0, num), 3))
+                except Exception:
+                    self.speed = "20x"
+                    self.speed_sleep = 0.3
+
+            return self.speed_sleep
+
     def start_simulation(
         self,
         symbol: str,
@@ -103,7 +136,8 @@ class SimulationEngine:
         stop_loss_pct: float,
         target_date_str: Optional[str] = None,
         fast_mode: bool = False,
-        agent_mode: str = "combined"
+        agent_mode: str = "combined",
+        speed: str = "20x"
     ):
         with self.lock:
             if self.thread and self.thread.is_alive():
@@ -136,7 +170,6 @@ class SimulationEngine:
                 self.data_source = data_banner
                 self.date_str = resolved_date
                 self.candle_granularity = "5m"
-                self.speed_sleep = 0.0 if fast_mode else 6.0
             else:
                 ohlc, data_source, resolved_date = fetch_daily_ohlc(self.symbol, target_date_str)
                 self.data_source = data_banner if data_banner else data_source
@@ -144,7 +177,8 @@ class SimulationEngine:
                 self.candles_1m = generate_intraday_candles(self.symbol, self.date_str, ohlc)
                 self.prior_day_1m = generate_fake_prior_day_candles(self.symbol, self.date_str, ohlc["prev_close"])
                 self.candle_granularity = "1m"
-                self.speed_sleep = 0.0 if fast_mode else CANDLE_INTERVAL_REAL_SEC
+
+            self.set_speed(speed, fast_mode=fast_mode)
 
             self.all_news = fetch_rss_headlines(self.symbol, self.date_str)
 
@@ -1057,6 +1091,8 @@ class SimulationEngine:
                 "is_real_data": self.is_real_data,
                 "data_banner": self.data_banner,
                 "candle_granularity": self.candle_granularity,
+                "speed": self.speed,
+                "speed_sleep": self.speed_sleep,
                 "current_regime": self.current_regime,
                 "orb_high": self.orb_high,
                 "orb_low": self.orb_low,

@@ -2,13 +2,13 @@
   "agent1": {
     "id": "agent1",
     "name": "Agent 1 \u2014 Trend & Breakout",
-    "strategy_id": "strat_orb",
-    "strategy_name": "Opening Range Breakout (ORB)",
+    "strategy_id": "strat_adx_di_regime",
+    "strategy_name": "ADX 14 + DI + EMA 200",
     "enabled": true,
     "weight": 0.35,
     "params": {
-      "range_bars": 3,
       "entry_window_end": "14:45",
+      "range_bars": 3,
       "trailing_atr_multiplier": 1.5
     }
   },
@@ -19,7 +19,7 @@
     "weight": 0.3,
     "negative_veto_threshold": -0.5,
     "short_veto_threshold": 0.5,
-    "sentiment_sensitivity": 1.0,
+    "sentiment_sensitivity": 1,
     "veto_on_critical_event": true
   },
   "agent3": {
@@ -30,25 +30,25 @@
     "enabled": true,
     "weight": 0.35,
     "params": {
-      "rsi_oversold": 35.0,
-      "rsi_overbought": 65.0,
+      "min_bars": 8,
       "pct_b_threshold": 0.15,
-      "min_bars": 8
+      "rsi_overbought": 65,
+      "rsi_oversold": 35
     }
   },
   "council": {
     "buy_trigger_score": 0.15,
     "sell_trigger_score": -0.15,
-    "min_confidence": 40.0,
+    "min_confidence": 40,
     "regime_adaptive_weights": true
   },
   "risk": {
     "risk_per_trade_pct": 0.5,
     "atr_stop_multiplier": 1.5,
     "target_r_multiple": 1.5,
-    "daily_loss_limit_pct": 2.0,
+    "daily_loss_limit_pct": 2,
     "max_trades_per_day": 6,
-    "paper_trading_capital": 100000.0,
+    "paper_trading_capital": 100000,
     "cooldown_bars": 3
   }
 }

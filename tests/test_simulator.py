@@ -646,15 +646,17 @@ def test_council_news_veto():
 # 15. F: Cost Filter Tests
 # -------------------------------------------------------------
 def test_cost_filter_skips_when_move_less_than_3x_cost():
-    """F: Skip if expected move < 3 x round-trip fees, with numbers recorded."""
+    """F: Default bot fee is removed (0.0). Regulatory fee calculation available if forced."""
     price = 100.0
     qty = 10
     fees = compute_round_trip_cost(price, qty)
-    assert fees > 0
+    assert fees == 0.0  # Bot fee removed for trades
 
-    # If expected move is tiny (0.01 per share -> 0.10 total), 3x fees > 0.10
+    # When regulatory fees are explicitly evaluated
+    reg_fees = compute_round_trip_cost(price, qty, force_regulatory=True)
+    assert reg_fees > 0
     expected_move = 0.10
-    assert expected_move < 3.0 * fees
+    assert expected_move < 3.0 * reg_fees
 
 # -------------------------------------------------------------
 # 16. Requirement 9 Acceptance Tests

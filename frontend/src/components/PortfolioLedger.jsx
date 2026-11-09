@@ -81,8 +81,8 @@ export default function PortfolioLedger({ state }) {
 
         <div className="p-3.5 rounded-xl bg-[#0f141f] border border-[#1f293d]">
           <span className="text-slate-400 text-[10px] block mb-1">FEES & TAXES</span>
-          <span className="text-sm font-extrabold text-amber-400">
-            {formatINR(p.total_fees || 0)}
+          <span className="text-sm font-extrabold text-emerald-400">
+            ₹0.00 <span className="text-[10px] text-slate-400 font-normal">(Zero Bot Fee)</span>
           </span>
         </div>
       </div>
@@ -155,7 +155,7 @@ export default function PortfolioLedger({ state }) {
                   <th className="py-2.5 px-3">Entry Time / Price</th>
                   <th className="py-2.5 px-3">Exit Time / Price</th>
                   <th className="py-2.5 px-3">Duration</th>
-                  <th className="py-2.5 px-3">Brokerage & Fees</th>
+                  <th className="py-2.5 px-3">Bot Fee</th>
                   <th className="py-2.5 px-3 text-right">Net P&L</th>
                 </tr>
               </thead>
@@ -174,7 +174,7 @@ export default function PortfolioLedger({ state }) {
                         <span className="text-slate-400 text-[10px]">{t.sell_time}</span> • ₹{t.sell_price.toFixed(2)}
                       </td>
                       <td className="py-2 px-3 text-slate-400 text-[11px]">{t.holding_duration || '—'}</td>
-                      <td className="py-2 px-3 text-amber-400 font-medium">₹{(t.total_fees || 0).toFixed(2)}</td>
+                      <td className="py-2 px-3 text-emerald-400 font-medium">₹0.00</td>
                       <td className={`py-2 px-3 text-right font-bold ${isProfit ? 'text-[#00c896]' : 'text-[#eb5757]'}`}>
                         {formatINR(t.net_pnl || 0)}
                       </td>

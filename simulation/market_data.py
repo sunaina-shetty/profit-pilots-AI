@@ -293,6 +293,251 @@ def _synthetic_5min_fallback(
     return candles_5m, warmup_5m, False, banner, avg_opening_volume
 
 
+def normalize_timeframe(tf: str) -> str:
+    """Normalize timeframe string to canonical code: 5m, 15m, 1h, 1d, 1w, 1mo."""
+    raw = (tf or "").strip().lower().replace(" ", "")
+    if raw in ("5m", "5min", "5"):
+        return "5m"
+    if raw in ("15m", "15min", "15"):
+        return "15m"
+    if raw in ("1h", "1hour", "60m", "60"):
+        return "1h"
+    if raw in ("1d", "1day", "d", "daily"):
+        return "1d"
+    if raw in ("1w", "1week", "w", "weekly"):
+        return "1w"
+    if raw in ("1mo", "1m", "1month", "month", "monthly"):
+        return "1mo"
+    return "5m"
+
+
+def fetch_candles_by_timeframe(
+    symbol: str,
+    timeframe: str = "5m",
+    target_date_str: Optional[str] = None
+) -> Tuple[List[Dict[str, Any]], bool, str]:
+    """
+    Fetch multi-timeframe candles: 5m, 15m, 1h, 1d, 1w, 1mo.
+    Returns: (candles, is_real, banner)
+    """
+    global _ONLINE_FAILED
+    tf = normalize_timeframe(timeframe)
+    yf_symbol = symbol if symbol.endswith(".NS") or "." in symbol else f"{symbol}.NS"
+
+    tf_config = {
+        "5m": {"interval": "5m", "period": "60d"},
+        "15m": {"interval": "15m", "period": "60d"},
+        "1h": {"interval": "60m", "period": "60d"},
+        "1d": {"interval": "1d", "period": "1y"},
+        "1w": {"interval": "1wk", "period": "2y"},
+        "1mo": {"interval": "1mo", "period": "5y"}
+    }
+    cfg = tf_config.get(tf, tf_config["5m"])
+
+    if os.getenv("OFFLINE", "0") != "1" and not _ONLINE_FAILED:
+        try:
+            import yfinance as yf
+            ticker = yf.Ticker(yf_symbol)
+            df = ticker.history(interval=cfg["interval"], period=cfg["period"])
+
+            if not df.empty:
+                df = df.reset_index()
+                col = "Datetime" if "Datetime" in df.columns else ("Date" if "Date" in df.columns else None)
+                if col:
+                    df["dt"] = pd.to_datetime(df[col])
+                    ist_offset = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
+                    if df["dt"].dt.tz is None:
+                        df["dt"] = df["dt"].dt.tz_localize("UTC")
+                    df["dt"] = df["dt"].dt.tz_convert(ist_offset)
+                    df["date_str"] = df["dt"].dt.strftime("%Y-%m-%d")
+                    df["time_str"] = df["dt"].dt.strftime("%H:%M")
+
+                    # If intraday and target date specified, check if target date is in data
+                    if tf in ("5m", "15m") and target_date_str:
+                        df_target = df[
+                            (df["date_str"] == target_date_str) &
+                            (df["time_str"] >= "09:15") &
+                            (df["time_str"] <= "15:30")
+                        ].copy()
+                        if len(df_target) >= 5:
+                            df = df_target
+
+                    # If higher timeframes, keep clean recent history (up to last 150 bars)
+                    if len(df) > 150:
+                        df = df.iloc[-150:].copy()
+
+                    candles = []
+                    cum_vp = 0.0
+                    cum_vol = 0.0
+
+                    for _, row in df.iterrows():
+                        dt = row["dt"]
+                        ts = int(dt.timestamp())
+                        o = round(float(row["Open"]), 2)
+                        h = round(float(row["High"]), 2)
+                        l = round(float(row["Low"]), 2)
+                        c = round(float(row["Close"]), 2)
+                        v = int(row["Volume"]) if not pd.isna(row["Volume"]) else 0
+                        h = max(h, o, c)
+                        l = min(l, o, c)
+
+                        time_label = dt.strftime("%H:%M") if tf in ("5m", "15m", "1h") else dt.strftime("%Y-%m-%d")
+                        typ_p = (h + l + c) / 3.0
+                        cum_vp += typ_p * max(1, v)
+                        cum_vol += max(1, v)
+                        vwap = round(cum_vp / max(1.0, cum_vol), 2)
+
+                        candles.append({
+                            "time": ts,
+                            "timestamp": ts,
+                            "time_str": time_label,
+                            "date": dt.strftime("%Y-%m-%d"),
+                            "open": o,
+                            "high": h,
+                            "low": l,
+                            "close": c,
+                            "volume": v,
+                            "vwap": vwap
+                        })
+
+                    if candles:
+                        orb_h = candles[0]["high"]
+                        orb_l = candles[0]["low"]
+                        for c in candles:
+                            c["orb_high"] = orb_h
+                            c["orb_low"] = orb_l
+
+                        banner = f"REAL {tf.upper()} DATA | {len(candles)} bars"
+                        return candles, True, banner
+        except Exception as e:
+            pass
+
+    # Synthetic fallback for the requested timeframe
+    return _synthetic_timeframe_fallback(symbol, tf, target_date_str)
+
+
+def _synthetic_timeframe_fallback(
+    symbol: str,
+    tf: str,
+    target_date_str: Optional[str]
+) -> Tuple[List[Dict[str, Any]], bool, str]:
+    """Generates synthetic candles for any requested timeframe when offline or API fails."""
+    resolved_date = target_date_str or datetime.date.today().strftime("%Y-%m-%d")
+    base_price = 3850.0 if "TCS" in symbol else (2900.0 if "RELIANCE" in symbol else 1500.0)
+    seed = get_seed_from_str(f"{symbol}_{tf}_{resolved_date}_mock")
+    rng = np.random.RandomState(seed)
+
+    ist_tz = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
+
+    if tf in ("5m", "15m", "1h"):
+        # Resample synthetic 1-minute intraday candles
+        ohlc, _, _ = _get_mock_daily_ohlc(symbol, resolved_date)
+        candles_1m = generate_intraday_candles(symbol, resolved_date, ohlc)
+        step = 5 if tf == "5m" else (15 if tf == "15m" else 60)
+
+        candles = []
+        base_dt = datetime.datetime.strptime(resolved_date, "%Y-%m-%d")
+        cum_vp = 0.0
+        cum_vol = 0.0
+
+        for i in range(0, len(candles_1m), step):
+            chunk = candles_1m[i:i+step]
+            if not chunk:
+                continue
+            b_open = chunk[0]["open"]
+            b_close = chunk[-1]["close"]
+            b_high = max(c["high"] for c in chunk)
+            b_low = min(c["low"] for c in chunk)
+            b_vol = sum(c.get("volume", 0) for c in chunk)
+            b_time = chunk[-1]["time"]
+            open_time = chunk[0]["time"]
+
+            try:
+                bar_dt = datetime.datetime.combine(
+                    base_dt.date(),
+                    datetime.time(*map(int, open_time.split(":")))
+                ).replace(tzinfo=ist_tz)
+                ts = int(bar_dt.timestamp())
+            except Exception:
+                ts = 1700000000 + (i // step) * (step * 60)
+
+            typ_p = (b_high + b_low + b_close) / 3.0
+            cum_vp += typ_p * max(1, b_vol)
+            cum_vol += max(1, b_vol)
+            vwap = round(cum_vp / max(1.0, cum_vol), 2)
+
+            candles.append({
+                "time": ts,
+                "timestamp": ts,
+                "time_str": b_time,
+                "date": resolved_date,
+                "open": b_open,
+                "high": b_high,
+                "low": b_low,
+                "close": b_close,
+                "volume": b_vol,
+                "vwap": vwap
+            })
+
+        orb_h = candles[0]["high"] if candles else 0.0
+        orb_l = candles[0]["low"] if candles else 0.0
+        for c in candles:
+            c["orb_high"] = orb_h
+            c["orb_low"] = orb_l
+
+        banner = f"SYNTHETIC {tf.upper()} INTRADAY DATA | {len(candles)} bars"
+        return candles, False, banner
+
+    # Multi-day synthetic history (1d, 1w, 1mo)
+    count = 60 if tf == "1d" else (52 if tf == "1w" else 24)
+    step_days = 1 if tf == "1d" else (7 if tf == "1w" else 30)
+
+    candles = []
+    curr_close = base_price
+    end_date = datetime.date.today()
+    start_date = end_date - datetime.timedelta(days=count * step_days)
+
+    cum_vp = 0.0
+    cum_vol = 0.0
+
+    for i in range(count):
+        bar_date = start_date + datetime.timedelta(days=i * step_days)
+        bar_dt = datetime.datetime.combine(bar_date, datetime.time(9, 15)).replace(tzinfo=ist_tz)
+        ts = int(bar_dt.timestamp())
+
+        drift = rng.normal(0.0005, 0.015)
+        bar_open = round(curr_close * (1.0 + rng.uniform(-0.005, 0.005)), 2)
+        bar_close = round(bar_open * (1.0 + drift), 2)
+        spread = abs(bar_close - bar_open) + (bar_open * rng.uniform(0.008, 0.025))
+        bar_high = round(max(bar_open, bar_close) + spread * rng.uniform(0.2, 0.7), 2)
+        bar_low = round(min(bar_open, bar_close) - spread * rng.uniform(0.2, 0.7), 2)
+        vol = int(rng.uniform(1000000, 5000000) * (1 if tf == "1d" else (5 if tf == "1w" else 20)))
+
+        curr_close = bar_close
+        typ_p = (bar_high + bar_low + bar_close) / 3.0
+        cum_vp += typ_p * vol
+        cum_vol += vol
+        vwap = round(cum_vp / max(1.0, cum_vol), 2)
+
+        candles.append({
+            "time": ts,
+            "timestamp": ts,
+            "time_str": bar_date.strftime("%Y-%m-%d"),
+            "date": bar_date.strftime("%Y-%m-%d"),
+            "open": bar_open,
+            "high": bar_high,
+            "low": bar_low,
+            "close": bar_close,
+            "volume": vol,
+            "vwap": vwap,
+            "orb_high": bar_high,
+            "orb_low": bar_low
+        })
+
+    banner = f"SYNTHETIC {tf.upper()} HISTORICAL DATA | {len(candles)} bars"
+    return candles, False, banner
+
+
 def _resample_1m_to_5m_candles(candles_1m: List[Dict[str, Any]], date_str: str) -> List[Dict[str, Any]]:
     """Resample 1-minute candles to 5-minute OHLCV candles."""
     result = []

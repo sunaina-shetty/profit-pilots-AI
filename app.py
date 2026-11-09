@@ -11,7 +11,7 @@ sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 
 from simulation.config import POPULAR_NSE_STOCKS
 from simulation.engine import engine
-from simulation.market_data import fetch_5min_candles, fetch_daily_ohlc
+from simulation.market_data import fetch_5min_candles, fetch_daily_ohlc, fetch_candles_by_timeframe, normalize_timeframe
 from simulation.strategies.registry import list_all_strategies
 from simulation.agent_config import agent_config_manager
 from simulation.backtest import run_strategy_backtest
@@ -32,14 +32,35 @@ def get_stocks():
 @app.route("/api/candles", methods=["GET"])
 def get_candles():
     """
-    Returns full 5-minute candles with indicators (VWAP, ORB High/Low, Volume)
-    for previewing the trading session before START is clicked.
+    Returns candles with indicators for the requested timeframe (5m, 15m, 1h, 1d, 1w, 1mo).
     """
     symbol = request.args.get("symbol", "TCS").strip().upper()
     target_date = request.args.get("date", "").strip() or None
+    timeframe = request.args.get("timeframe", "5m").strip().lower()
 
     yf_symbol = symbol if "." in symbol else f"{symbol}.NS"
     resolved_date = target_date or datetime.date.today().strftime("%Y-%m-%d")
+    norm_tf = normalize_timeframe(timeframe)
+
+    if norm_tf != "5m":
+        try:
+            candles, is_real, data_banner = fetch_candles_by_timeframe(yf_symbol, norm_tf, resolved_date)
+            return jsonify({
+                "status": "success",
+                "symbol": yf_symbol,
+                "date": resolved_date,
+                "timeframe": norm_tf,
+                "is_real_data": is_real,
+                "data_banner": data_banner,
+                "candle_count": len(candles),
+                "first_candle_time": candles[0]["time_str"] if candles else None,
+                "last_candle_time": candles[-1]["time_str"] if candles else None,
+                "first_timestamp": candles[0]["time"] if candles else None,
+                "last_timestamp": candles[-1]["time"] if candles else None,
+                "candles": candles
+            })
+        except Exception as e:
+            return jsonify({"error": f"Failed to load {norm_tf} candles: {str(e)}"}), 500
 
     try:
         candles_5m, warmup_5m, is_real, data_banner, avg_opening_vol = fetch_5min_candles(
@@ -140,15 +161,30 @@ def start_simulation():
             return jsonify({"error": "Invalid date format. Expected YYYY-MM-DD"}), 400
 
     try:
+        speed = str(data.get("speed", "20x"))
         engine.start_simulation(
             symbol=symbol,
             amount=amount,
             stop_loss_pct=stop_loss_pct,
-            target_date_str=target_date
+            target_date_str=target_date,
+            speed=speed
         )
         return jsonify({"status": "started", "state": engine.get_state()})
     except Exception as e:
         return jsonify({"error": f"Failed to start simulation: {str(e)}"}), 500
+
+@app.route("/api/speed", methods=["POST"])
+def update_simulation_speed():
+    """Dynamically updates simulation speed (e.g. 1x, 5x, 10x, 20x, 50x, 100x, MAX)."""
+    data = request.get_json(silent=True) or {}
+    speed = data.get("speed", "20x")
+    sleep_sec = engine.set_speed(speed)
+    return jsonify({
+        "status": "success",
+        "speed": engine.speed,
+        "speed_sleep": sleep_sec,
+        "state": engine.get_state()
+    })
 
 @app.route("/api/state", methods=["GET"])
 def get_state():

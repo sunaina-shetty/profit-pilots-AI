@@ -298,8 +298,8 @@ export default function RightDock({
                     </span>
                   </div>
                   <div className="flex justify-between text-slate-400">
-                    <span>Regulatory & Brokerage Fees:</span>
-                    <span className="text-amber-400 font-bold">₹{(portfolio.total_fees || 0).toFixed(2)}</span>
+                    <span>Trade Fees (Bot Fee Removed):</span>
+                    <span className="text-emerald-400 font-bold">₹0.00</span>
                   </div>
                 </div>
               </div>

@@ -27,6 +27,30 @@ function formatINR(val) {
   );
 }
 
+// Resample 5m candles into higher timeframe chunks (15m, 1h)
+function resampleCandles(candles, factor) {
+  if (!candles || candles.length === 0 || factor <= 1) return candles || [];
+  const resampled = [];
+  for (let i = 0; i < candles.length; i += factor) {
+    const chunk = candles.slice(i, i + factor);
+    if (chunk.length === 0) continue;
+    const first = chunk[0];
+    const last = chunk[chunk.length - 1];
+    resampled.push({
+      ...last,
+      open: first.open,
+      high: Math.max(...chunk.map((c) => Number(c.high) || first.open)),
+      low: Math.min(...chunk.map((c) => Number(c.low) || first.open)),
+      close: last.close,
+      volume: chunk.reduce((acc, c) => acc + (Number(c.volume) || 0), 0),
+      time: last.time,
+      timestamp: last.timestamp || last.time,
+      time_str: last.time_str || first.time_str
+    });
+  }
+  return resampled;
+}
+
 export default function App() {
   const [lang, setLang] = useState('en');
   const t = useMemo(() => translations[lang] || translations.en, [lang]);
@@ -41,6 +65,8 @@ export default function App() {
   const [stopLossPct, setStopLossPct] = useState(1.0);
   const [selectedDate, setSelectedDate] = useState('');
   const [stocksList, setStocksList] = useState([]);
+  const [timeframe, setTimeframe] = useState('5m'); // '5m' | '15m' | '1h' | '1d' | '1w' | '1mo'
+  const [simulationSpeed, setSimulationSpeed] = useState('20x'); // '1x' | '5x' | '10x' | '20x' | '50x'
 
   // Server state
   const [state, setState] = useState({
@@ -103,7 +129,8 @@ export default function App() {
     setApiError(null);
 
     const targetDateParam = selectedDate ? `&date=${selectedDate}` : '';
-    fetch(`/api/candles?symbol=${encodeURIComponent(activeSymbol)}${targetDateParam}`)
+    const tfParam = `&timeframe=${encodeURIComponent(timeframe)}`;
+    fetch(`/api/candles?symbol=${encodeURIComponent(activeSymbol)}${targetDateParam}${tfParam}`)
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.json();
@@ -132,7 +159,7 @@ export default function App() {
     return () => {
       isCancelled = true;
     };
-  }, [activeSymbol, selectedDate, state.status]);
+  }, [activeSymbol, selectedDate, timeframe, state.status]);
 
   // Real-time EventSource SSE + Fallback Polling
   useEffect(() => {
@@ -171,6 +198,21 @@ export default function App() {
     };
   }, []);
 
+  const handleSpeedChange = async (newSpeed) => {
+    setSimulationSpeed(newSpeed);
+    if (state.status === 'RUNNING') {
+      try {
+        await fetch('/api/speed', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ speed: newSpeed })
+        });
+      } catch (err) {
+        console.warn('Failed to dynamically update speed:', err);
+      }
+    }
+  };
+
   const handleStart = async () => {
     setApiError(null);
     try {
@@ -181,7 +223,8 @@ export default function App() {
           symbol: activeSymbol,
           amount: Number(amount),
           stop_loss_pct: Number(stopLossPct),
-          date: selectedDate || undefined
+          date: selectedDate || undefined,
+          speed: simulationSpeed
         })
       });
       const data = await resp.json();
@@ -244,7 +287,29 @@ export default function App() {
   const isDone = state.status === 'DONE';
 
   const isSimulationActive = isRunning || isKilled || isDone;
-  const displayCandles = isSimulationActive ? (state.closes_so_far || []) : previewCandles;
+  const displayCandles = useMemo(() => {
+    if (!isSimulationActive) return previewCandles || [];
+    const base = state.closes_so_far || [];
+    if (timeframe === '5m') return base;
+    if (timeframe === '15m') return resampleCandles(base, 3);
+    if (timeframe === '1h') return resampleCandles(base, 12);
+    // For 1d, 1w, 1mo, if preview candles exist, reflect current simulated close
+    if (previewCandles && previewCandles.length > 0) {
+      if (base.length > 0) {
+        const lastBase = base[base.length - 1];
+        const lastPrev = previewCandles[previewCandles.length - 1];
+        const updatedLast = {
+          ...lastPrev,
+          close: lastBase.close,
+          high: Math.max(lastPrev.high, lastBase.high),
+          low: Math.min(lastPrev.low, lastBase.low),
+        };
+        return [...previewCandles.slice(0, -1), updatedLast];
+      }
+      return previewCandles;
+    }
+    return base;
+  }, [isSimulationActive, state.closes_so_far, previewCandles, timeframe]);
   const currentTimestamp = isSimulationActive && state.closes_so_far && state.closes_so_far.length > 0
     ? state.closes_so_far[state.closes_so_far.length - 1].timestamp
     : (previewCandles.length > 0 ? previewCandles[0].timestamp : null);
@@ -447,6 +512,43 @@ export default function App() {
                     />
                   </div>
 
+                  {/* Simulation Speed Pill Buttons (with prominent 20x) */}
+                  <div className="flex flex-col">
+                    <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
+                      Speed
+                    </label>
+                    <div className="flex items-center bg-[#161f30] border border-[#1f293d] rounded-lg p-0.5 gap-0.5">
+                      {[
+                        { id: '1x', label: '1x' },
+                        { id: '5x', label: '5x' },
+                        { id: '10x', label: '10x' },
+                        { id: '20x', label: '20x' },
+                        { id: '50x', label: '50x' }
+                      ].map((sp) => {
+                        const isActive = simulationSpeed.toLowerCase() === sp.id.toLowerCase();
+                        const is20x = sp.id === '20x';
+                        return (
+                          <button
+                            key={sp.id}
+                            type="button"
+                            onClick={() => handleSpeedChange(sp.id)}
+                            className={`px-2 py-1 rounded text-xs font-extrabold transition-all flex items-center gap-0.5 ${
+                              isActive
+                                ? 'bg-amber-400 text-slate-950 shadow-sm shadow-amber-950 font-black'
+                                : is20x
+                                ? 'text-amber-400 font-bold hover:bg-[#1f293d]'
+                                : 'text-slate-400 hover:text-white hover:bg-[#1f293d]'
+                            }`}
+                            title={`Run simulation at ${sp.label} speed`}
+                          >
+                            {is20x && <span className="text-[10px]">⚡</span>}
+                            <span>{sp.label}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
                   {/* START SIMULATION BUTTON */}
                   <button
                     disabled={isRunning}
@@ -497,6 +599,10 @@ export default function App() {
                   setShowStopLoss={setShowStopLoss}
                   showHoldSignals={showHoldSignals}
                   setShowHoldSignals={setShowHoldSignals}
+                  selectedTimeframe={timeframe}
+                  onSelectTimeframe={(tf) => setTimeframe(tf)}
+                  simulationSpeed={simulationSpeed}
+                  onSelectSpeed={handleSpeedChange}
                 />
               </section>
 

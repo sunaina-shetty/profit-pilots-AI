@@ -26,29 +26,35 @@ def round_down_tick(price: float, tick: float = TICK_SIZE) -> float:
 def round_tick(price: float, tick: float = TICK_SIZE) -> float:
     return round(round(price / tick) * tick, 2)
 
-def calculate_fees(price: float, qty: int, side: str) -> float:
-    """Calculate regulatory and brokerage fees for an execution."""
+def calculate_fees(price: float, qty: int, side: str, force_regulatory: bool = False) -> float:
+    """Calculate regulatory and brokerage fees for an execution. Default: 0.0 (bot fee removed)."""
     if qty <= 0:
         return 0.0
+    if not force_regulatory and not getattr(DEFAULT_CONFIG, "enable_fees", False):
+        return 0.0
     val = price * qty
-    brokerage = min(DEFAULT_CONFIG.brokerage_max, val * DEFAULT_CONFIG.brokerage_pct)
-    exchange = val * DEFAULT_CONFIG.exchange_txn_pct
-    gst = (brokerage + exchange) * DEFAULT_CONFIG.gst_pct
+    brokerage = min(20.0, val * 0.0003)
+    exchange = val * 0.00003
+    gst = (brokerage + exchange) * 0.18
 
     if side == "BUY":
-        stamp = val * DEFAULT_CONFIG.stamp_duty_buy_pct
+        stamp = val * 0.00003
         stt = 0.0
     else:
         stamp = 0.0
-        stt = val * DEFAULT_CONFIG.stt_sell_pct
+        stt = val * 0.00025
 
     return round(brokerage + exchange + gst + stamp + stt, 2)
 
-def compute_round_trip_cost(price: float, qty: int) -> float:
+def compute_round_trip_cost(price: float, qty: int, force_regulatory: bool = False) -> float:
     """Compute total round-trip brokerage & regulatory fees for a buy and sell."""
     if qty <= 0:
         return 0.0
-    return round(calculate_fees(price, qty, "BUY") + calculate_fees(price, qty, "SELL"), 2)
+    return round(
+        calculate_fees(price, qty, "BUY", force_regulatory=force_regulatory) +
+        calculate_fees(price, qty, "SELL", force_regulatory=force_regulatory),
+        2
+    )
 
 
 class PaperBroker:
@@ -183,7 +189,7 @@ class PaperBroker:
             raise ValueError(f"execute_buy called with qty={qty}. Must be >= 1.")
 
         fees = calculate_fees(fill_price, qty, "BUY")
-        assert fees > 0, f"BUY fees must be > 0 when qty={qty}, got fees={fees}"
+        assert fees >= 0, f"BUY fees must be >= 0 when qty={qty}, got fees={fees}"
 
         stop_dist = self.calculate_stop_distance(fill_price, atr)
         stop_price = round_down_tick(fill_price - stop_dist)
@@ -231,7 +237,7 @@ class PaperBroker:
             raise ValueError(f"execute_short called with qty={qty}. Must be >= 1.")
 
         fees = calculate_fees(fill_price, qty, "SELL")
-        assert fees > 0, f"SHORT fees must be > 0 when qty={qty}, got fees={fees}"
+        assert fees >= 0, f"SHORT fees must be >= 0 when qty={qty}, got fees={fees}"
 
         stop_dist = self.calculate_stop_distance(fill_price, atr)
         stop_price = round_tick(fill_price + stop_dist)

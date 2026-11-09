@@ -107,7 +107,7 @@ def test_6_executed_trade_places_markers_at_actual_timestamps():
     eng.broker.execute_sell(c["close"], c["time_str"], "Test Exit", auth_key)
     
     assert len(eng.broker.closed_trades) >= 1
-    t = eng.broker.closed_trades[0]
+    t = eng.broker.closed_trades[-1]
     assert t["qty"] == 10
     assert t["net_pnl"] != 0.0
 

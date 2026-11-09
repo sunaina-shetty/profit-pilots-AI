@@ -8,7 +8,7 @@ from typing import List, Dict, Any, Tuple
 import requests
 import feedparser
 from simulation.llm import call_llm
-from simulation.config import POPULAR_NSE_STOCKS
+from simulation.config import POPULAR_NSE_STOCKS, DEFAULT_CONFIG
 
 # Financial keyword lexicon for deterministic fallback scoring
 POSITIVE_WORDS = {
@@ -21,6 +21,15 @@ NEGATIVE_WORDS = {
     "miss": -0.7, "cut": -0.6, "bearish": -0.8, "downgrade": -0.8, "probe": -0.85,
     "fraud": -0.95, "penalty": -0.75, "fine": -0.7, "delay": -0.6, "concern": -0.5
 }
+CRITICAL_EVENT_KEYWORDS = [
+    "fraud", "probe", "investigation", "sebi", "cbi", "raid", "ceo resigns",
+    "scam", "default", "bankruptcy", "insolvency", "penalty", "arrest"
+]
+
+HIGH_VOLATILITY_KEYWORDS = [
+    "earnings", "results", "q1", "q2", "q3", "q4", "merger", "acquisition",
+    "budget", "rbi", "rate hike", "fed", "election", "guidance"
+]
 
 def get_company_name(symbol: str) -> str:
     for item in POPULAR_NSE_STOCKS:
@@ -38,7 +47,6 @@ def fetch_rss_headlines(symbol: str, target_date_str: str) -> List[Dict[str, Any
 
     company_name = get_company_name(symbol)
     
-    # Calculate day-1 and day+1 for query
     try:
         dt = datetime.datetime.strptime(target_date_str, "%Y-%m-%d")
     except Exception:
@@ -73,10 +81,8 @@ def fetch_rss_headlines(symbol: str, target_date_str: str) -> List[Dict[str, Any
 
             try:
                 pub_dt = parsedate_to_datetime(published_str)
-                # Convert to IST
                 pub_ist = pub_dt.astimezone(ist_tz)
             except Exception:
-                # Default to start of day IST
                 pub_ist = datetime.datetime(dt.year, dt.month, dt.day, 9, 0, tzinfo=ist_tz)
 
             headlines.append({
@@ -111,11 +117,6 @@ def keyword_score_headline(text: str) -> float:
     return 0.0
 
 def score_headlines_batch(headlines: List[Dict[str, Any]]) -> List[float]:
-    """
-    Scores all headlines in ONE LLM call per run.
-    Expects reply: JSON array of numbers between -1.0 and 1.0.
-    Falls back to keyword scoring if LLM is unavailable or malformed.
-    """
     if not headlines:
         return []
 
@@ -130,7 +131,6 @@ def score_headlines_batch(headlines: List[Dict[str, Any]]) -> List[float]:
     content, err = call_llm(system_prompt, user_prompt)
     if content and not err:
         try:
-            # Strip backticks if present
             clean = re.sub(r'```(?:json)?', '', content).strip()
             scores = json.loads(clean)
             if isinstance(scores, list) and len(scores) == len(headlines):
@@ -138,7 +138,6 @@ def score_headlines_batch(headlines: List[Dict[str, Any]]) -> List[float]:
         except Exception:
             pass
 
-    # Fallback to keyword scoring
     return [keyword_score_headline(h["title"]) for h in headlines]
 
 def evaluate_news_agent(
@@ -146,16 +145,15 @@ def evaluate_news_agent(
     simulated_ist_dt: datetime.datetime
 ) -> Dict[str, Any]:
     """
-    Evaluates News Agent at the current simulated time.
-    NO LOOKAHEAD: Only headlines published BEFORE simulated_ist_dt are visible.
-    net = sum of sentiment x 0.5^(age_minutes / 120).
-    Fewer than 2 headlines: cap net at 0.3.
-    BUY if net >= 0.35, SELL if net <= -0.35, else HOLD.
+    Agent 2 — News Sentiment Agent.
+    Score = net sentiment (-1.0 to +1.0) for the selected symbol.
+    Directional (can start a trade), not veto-only.
+    No headlines -> score 0.0, reason "No news: No fresh news published prior to this candle".
+    Veto only for strong-negative on BUY (< -0.50) and strong-positive on SHORT (> +0.50).
     """
     visible_headlines = []
     for h in all_headlines:
         pub_dt = h["published_ist"]
-        # Comparison with timezone awareness
         if pub_dt.tzinfo is None:
             ist_tz = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
             pub_dt = pub_dt.replace(tzinfo=ist_tz)
@@ -173,49 +171,114 @@ def evaluate_news_agent(
 
     if not visible_headlines:
         return {
+            "score": 0.0,
+            "confidence": 0.0,
             "signal": "HOLD",
-            "confidence": 0.20,
-            "reason": "No fresh news published prior to this candle",
-            "facts": {"headlines_count": 0, "net_sentiment": 0.0}
+            "classification": "INSUFFICIENT DATA",
+            "reason": "No news: No fresh news published prior to this candle",
+            "veto_buy": False,
+            "veto_short": False,
+            "headlines": [],
+            "facts": {
+                "headlines_count": 0,
+                "net_sentiment": 0.0,
+                "score": 0.0,
+                "classification": "INSUFFICIENT DATA",
+                "veto_buy": False,
+                "veto_short": False
+            }
         }
 
-    # Score visible headlines
     scores = score_headlines_batch(visible_headlines)
     
     net_sentiment = 0.0
+    has_critical_event = False
+    has_high_volatility = False
+
+    enriched_headlines = []
     for idx, item in enumerate(visible_headlines):
         sentiment = scores[idx]
         age_min = item["age_minutes"]
         decay = 0.5 ** (age_min / 120.0)
         net_sentiment += sentiment * decay
 
-    # With fewer than 2 headlines cap net at 0.3
+        title_lower = item["title"].lower()
+        is_crit = any(kw in title_lower for kw in CRITICAL_EVENT_KEYWORDS)
+        is_high_vol = any(kw in title_lower for kw in HIGH_VOLATILITY_KEYWORDS)
+        if is_crit:
+            has_critical_event = True
+        if is_high_vol:
+            has_high_volatility = True
+
+        h_class = "CRITICAL EVENT" if is_crit else ("POSITIVE" if sentiment > 0.2 else ("NEGATIVE" if sentiment < -0.2 else "NEUTRAL"))
+        enriched_headlines.append({
+            "title": item["title"],
+            "published_iso": item.get("published_iso", ""),
+            "time_str": item.get("time_str", "09:00"),
+            "sentiment": round(sentiment, 2),
+            "classification": h_class,
+            "age_minutes": round(age_min, 1)
+        })
+
+    # With fewer than 2 headlines cap net at 0.30
     if len(visible_headlines) < 2:
-        net_sentiment = min(0.3, max(-0.3, net_sentiment))
+        net_sentiment = min(0.30, max(-0.30, net_sentiment))
+    else:
+        net_sentiment = max(-1.0, min(1.0, net_sentiment / max(1.0, len(visible_headlines) ** 0.5)))
 
     net_sentiment = round(net_sentiment, 3)
+    score = net_sentiment
 
-    if net_sentiment >= 0.35:
-        conf = min(0.95, round(0.50 + abs(net_sentiment) * 0.45, 2))
-        return {
-            "signal": "BUY",
-            "confidence": conf,
-            "reason": f"Positive news momentum (net sentiment +{net_sentiment} across {len(visible_headlines)} headlines)",
-            "facts": {"headlines_count": len(visible_headlines), "net_sentiment": net_sentiment}
-        }
-    elif net_sentiment <= -0.35:
-        conf = min(0.95, round(0.50 + abs(net_sentiment) * 0.45, 2))
-        return {
-            "signal": "SELL",
-            "confidence": conf,
-            "reason": f"Negative news risk (net sentiment {net_sentiment} across {len(visible_headlines)} headlines)",
-            "facts": {"headlines_count": len(visible_headlines), "net_sentiment": net_sentiment}
-        }
+    # Classification
+    if has_critical_event:
+        classification = "CRITICAL EVENT"
+    elif score >= 0.30:
+        classification = "POSITIVE"
+    elif score <= -0.30:
+        classification = "NEGATIVE"
+    elif has_high_volatility:
+        classification = "HIGH VOLATILITY"
     else:
-        return {
-            "signal": "HOLD",
-            "confidence": 0.45,
-            "reason": f"Neutral news environment (net sentiment {net_sentiment} across {len(visible_headlines)} headlines)",
-            "facts": {"headlines_count": len(visible_headlines), "net_sentiment": net_sentiment}
-        }
+        classification = "NEUTRAL"
 
+    veto_buy = (score < DEFAULT_CONFIG.news_buy_veto_threshold) or has_critical_event
+    veto_short = (score > DEFAULT_CONFIG.news_short_veto_threshold)
+
+    conf = min(100.0, round(max(30.0, 40.0 + abs(score) * 55.0), 1))
+
+    if has_critical_event:
+        sig = "SELL"
+        reason = f"CRITICAL EVENT detected in news; high tail-risk veto"
+    elif score >= 0.35:
+        sig = "BUY"
+        reason = f"Bullish news momentum (net sentiment {score:+.2f} across {len(visible_headlines)} headlines)"
+    elif score <= -0.35:
+        sig = "SELL"
+        reason = f"Bearish news risk (net sentiment {score:+.2f} across {len(visible_headlines)} headlines)"
+    else:
+        sig = "HOLD"
+        reason = f"Neutral news environment (net sentiment {score:+.2f} across {len(visible_headlines)} headlines)"
+
+    if veto_buy:
+        reason += f" [VETO BUY: sentiment {score:+.2f} or Critical Event]"
+    elif veto_short:
+        reason += f" [VETO SHORT: sentiment {score:+.2f} > +0.50]"
+
+    return {
+        "score": score,
+        "confidence": conf,
+        "signal": sig,
+        "classification": classification,
+        "reason": reason,
+        "veto_buy": veto_buy,
+        "veto_short": veto_short,
+        "headlines": enriched_headlines,
+        "facts": {
+            "headlines_count": len(visible_headlines),
+            "net_sentiment": net_sentiment,
+            "classification": classification,
+            "score": score,
+            "veto_buy": veto_buy,
+            "veto_short": veto_short
+        }
+    }

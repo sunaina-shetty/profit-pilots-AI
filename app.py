@@ -11,7 +11,10 @@ sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 
 from simulation.config import POPULAR_NSE_STOCKS
 from simulation.engine import engine
-from simulation.market_data import fetch_5min_candles
+from simulation.market_data import fetch_5min_candles, fetch_daily_ohlc
+from simulation.strategies.registry import list_all_strategies
+from simulation.agent_config import agent_config_manager
+from simulation.backtest import run_strategy_backtest
 
 app = Flask(__name__, static_folder="frontend/dist", static_url_path="")
 CORS(app)
@@ -172,11 +175,116 @@ def stream_state():
         }
     )
 
+@app.route("/api/strategies", methods=["GET"])
+def get_strategies():
+    """Returns catalog of all 10 technical trading strategies."""
+    return jsonify({"strategies": list_all_strategies()})
+
+@app.route("/api/agent-config", methods=["GET"])
+def get_agent_config():
+    """Returns current persisted agent and strategy configuration."""
+    return jsonify(agent_config_manager.get_config())
+
+@app.route("/api/agent-config", methods=["POST"])
+def update_agent_config():
+    """Updates agent and strategy configuration."""
+    patch = request.get_json() or {}
+    updated = agent_config_manager.update_config(patch)
+    return jsonify({"status": "updated", "config": updated})
+
+@app.route("/api/agent-config/reset", methods=["POST"])
+def reset_agent_config():
+    """Resets configuration to factory defaults."""
+    resetted = agent_config_manager.reset_defaults()
+    return jsonify({"status": "reset", "config": resetted})
+
+@app.route("/api/market-indices", methods=["GET"])
+def get_market_indices():
+    """Returns live or realistic top indices for the Groww-inspired top market bar."""
+    indices = [
+        {"name": "NIFTY 50", "value": 24997.30, "change": 10.90, "change_pct": 0.04, "is_up": True},
+        {"name": "SENSEX", "value": 81059.38, "change": 59.98, "change_pct": 0.07, "is_up": True},
+        {"name": "BANK NIFTY", "value": 59490.60, "change": 639.95, "change_pct": 1.09, "is_up": True},
+        {"name": "Crude Oil", "value": 8446.00, "change": -108.00, "change_pct": -1.26, "is_up": False, "currency": "₹"},
+        {"name": "Natural Gas", "value": 286.40, "change": 1.40, "change_pct": 0.49, "is_up": True, "currency": "₹"},
+    ]
+    return jsonify({"indices": indices})
+
+@app.route("/api/stock-quote", methods=["GET"])
+def get_stock_quote():
+    """Returns detailed market metrics for the selected stock for the Groww top market bar."""
+    symbol = request.args.get("symbol", "TCS").strip().upper()
+    yf_symbol = symbol if "." in symbol else f"{symbol}.NS"
+    try:
+        ohlc, source, _ = fetch_daily_ohlc(yf_symbol)
+        curr = ohlc.get("close", 0.0)
+        prev = ohlc.get("prev_close", curr)
+        diff = round(curr - prev, 2)
+        diff_pct = round((diff / prev) * 100.0, 2) if prev > 0 else 0.0
+        
+        # Match stock name from catalog
+        name = symbol
+        for s in POPULAR_NSE_STOCKS:
+            if s["symbol"].replace(".NS", "") == symbol or s["symbol"] == symbol:
+                name = s.get("name", symbol)
+                break
+
+        return jsonify({
+            "symbol": symbol,
+            "name": name,
+            "current_price": curr,
+            "change": diff,
+            "change_pct": diff_pct,
+            "day_high": ohlc.get("high", curr),
+            "day_low": ohlc.get("low", curr),
+            "prev_close": prev,
+            "volume": int(ohlc.get("volume", 0)),
+            "data_source": source,
+            "is_available": curr > 0
+        })
+    except Exception as e:
+        return jsonify({
+            "symbol": symbol,
+            "name": symbol,
+            "is_available": False,
+            "error": str(e)
+        }), 200
+
+@app.route("/api/backtest", methods=["POST"])
+def backtest_strategy():
+    """Executes multi-day chronological strategy backtest with fee modeling and no lookahead bias."""
+    data = request.get_json() or {}
+    symbol = data.get("symbol", "TCS").strip().upper()
+    strategy_id = data.get("strategy_id", "strat_orb")
+    days = int(data.get("days", 5))
+    initial_capital = float(data.get("initial_capital", 100000.0))
+    risk_per_trade_pct = float(data.get("risk_per_trade_pct", 0.5))
+    stop_loss_pct = float(data.get("stop_loss_pct", 1.0))
+    target_rr = float(data.get("target_rr", 1.5))
+    params = data.get("params")
+
+    try:
+        results = run_strategy_backtest(
+            symbol=symbol,
+            strategy_id=strategy_id,
+            strategy_params=params,
+            days=days,
+            initial_capital=initial_capital,
+            risk_per_trade_pct=risk_per_trade_pct,
+            stop_loss_pct=stop_loss_pct,
+            target_rr=target_rr
+        )
+        return jsonify(results)
+    except Exception as e:
+        return jsonify({"error": f"Backtest execution failed: {str(e)}"}), 500
+
 @app.route("/api/kill", methods=["POST"])
 def kill_simulation():
+    data = request.get_json(silent=True) or {}
+    mode = data.get("mode", "flatten")
     try:
-        engine.kill_simulation()
-        return jsonify({"status": "killed", "state": engine.get_state()})
+        engine.kill_simulation(mode=mode)
+        return jsonify({"status": "killed", "mode": mode, "state": engine.get_state()})
     except Exception as e:
         return jsonify({"error": f"Failed to kill simulation: {str(e)}"}), 500
 

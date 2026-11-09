@@ -55,6 +55,7 @@ export default function CandlestickChart({
   // SVG Trade Connection Lines state & cursor X coordinate
   const [svgLines, setSvgLines] = useState([]);
   const [cursorX, setCursorX] = useState(null);
+  const latestPrice = candles && candles.length > 0 ? (candles[candles.length - 1].close || 0) : 0;
 
   // STEP 1 & STEP 5: Initialize Lightweight Charts instance
   useEffect(() => {
@@ -588,6 +589,23 @@ export default function CandlestickChart({
 
       {/* Chart Canvas & SVG Connection Lines Layer */}
       <div className="relative w-full h-[380px] rounded-lg overflow-hidden border border-[#1e293b] bg-[#111827]">
+        {/* Groww Terminal-style Floating Buy/Sell Badges */}
+        {latestPrice > 0 && (
+          <div className="absolute top-2.5 left-3 z-20 flex items-center gap-1.5 font-mono text-xs select-none bg-[#0b0e14]/80 backdrop-blur-sm p-1 rounded-lg border border-[#1f293d] shadow-lg pointer-events-auto">
+            <div className="flex items-center gap-1 px-2 py-0.5 rounded bg-[#eb5757] text-white font-bold text-[11px] shadow-sm shadow-rose-950">
+              <span>₹{(latestPrice - 0.85).toFixed(2)}</span>
+              <span className="text-[9px] font-sans font-extrabold uppercase ml-1 opacity-90">SELL</span>
+            </div>
+            <div className="px-1.5 py-0.5 rounded bg-[#161f30] text-slate-400 text-[10px] font-bold">
+              1.70
+            </div>
+            <div className="flex items-center gap-1 px-2 py-0.5 rounded bg-[#00c896] text-black font-extrabold text-[11px] shadow-sm shadow-emerald-950">
+              <span>₹{(latestPrice + 0.85).toFixed(2)}</span>
+              <span className="text-[9px] font-sans font-extrabold uppercase ml-1 opacity-90">BUY</span>
+            </div>
+          </div>
+        )}
+
         {/* Lightweight Charts Canvas Container */}
         <div ref={chartContainerRef} className="w-full h-[380px]" style={{ minHeight: '380px' }} />
 

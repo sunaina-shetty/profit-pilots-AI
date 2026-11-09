@@ -48,9 +48,11 @@ def detect_regime(
             direction = "above high" if close > orb_high else "below low"
             return "TREND", f"TREND day: price ₹{close:.2f} {direction} ORB with ADX {adx:.1f} > 20"
     else:
-        # Before 10:00: early breakout above ORB high is an emerging trend
+        # Before 10:00: early breakout above ORB high or breakdown below ORB low is an emerging trend
         if close > orb_high:
             return "TREND", f"Early TREND breakout: price ₹{close:.2f} above ORB high ₹{orb_high:.2f}"
+        if close < orb_low:
+            return "TREND", f"Early TREND breakdown: price ₹{close:.2f} below ORB low ₹{orb_low:.2f}"
 
     return "UNCLEAR", f"UNCLEAR regime: ADX {adx:.1f}, ORB range ₹{orb_low:.2f}-₹{orb_high:.2f}, close ₹{close:.2f}"
 

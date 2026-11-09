@@ -94,19 +94,99 @@ def compute_adx(df: pd.DataFrame, period: int = 14) -> float:
         dx = np.where(sum_di > 0, 100.0 * np.abs(pdi - mdi) / (sum_di + 1e-9), 0.0)
         dx = np.nan_to_num(dx)
 
+    plus_di_val = float(np.nan_to_num(pdi[-1])) if len(pdi) > 0 else 0.0
+    minus_di_val = float(np.nan_to_num(mdi[-1])) if len(mdi) > 0 else 0.0
+
     if n <= period:
-        return 0.0
+        return 0.0, plus_di_val, minus_di_val
     if n <= 2 * period:
         # If between period and 2*period, take mean of dx
         valid_dx = dx[period:]
-        return float(np.mean(valid_dx)) if len(valid_dx) > 0 else 0.0
+        adx_val = float(np.mean(valid_dx)) if len(valid_dx) > 0 else 0.0
+        return adx_val, plus_di_val, minus_di_val
 
     adx_s = np.zeros(n)
     adx_s[2 * period] = np.mean(dx[period : 2 * period + 1])
     for i in range(2 * period + 1, n):
         adx_s[i] = (adx_s[i - 1] * (period - 1) + dx[i]) / period
 
-    return float(np.nan_to_num(adx_s[-1]))
+    return float(np.nan_to_num(adx_s[-1])), plus_di_val, minus_di_val
+
+
+def compute_supertrend(df: pd.DataFrame, period: int = 10, multiplier: float = 3.0):
+    """
+    Computes Supertrend indicator on OHLC DataFrame.
+    Returns: (latest_supertrend_price, direction [1 for Bullish, -1 for Bearish])
+    """
+    n = len(df)
+    if n == 0:
+        return 0.0, 1
+    if n < period:
+        mid = float((df["high"].iloc[-1] + df["low"].iloc[-1]) / 2.0)
+        return mid, 1
+
+    highs = df["high"].values.astype(float)
+    lows = df["low"].values.astype(float)
+    closes = df["close"].values.astype(float)
+
+    # True Range
+    tr = np.zeros(n)
+    tr[0] = highs[0] - lows[0]
+    for i in range(1, n):
+        tr[i] = max(highs[i] - lows[i], abs(highs[i] - closes[i - 1]), abs(lows[i] - closes[i - 1]))
+
+    # ATR Wilder smoothing
+    atr = np.zeros(n)
+    if n >= period:
+        atr[period - 1] = np.mean(tr[:period])
+        for i in range(period, n):
+            atr[i] = (atr[i - 1] * (period - 1) + tr[i]) / period
+
+    hl2 = (highs + lows) / 2.0
+    basic_upper = hl2 + (multiplier * atr)
+    basic_lower = hl2 - (multiplier * atr)
+
+    final_upper = np.zeros(n)
+    final_lower = np.zeros(n)
+    trend = np.zeros(n, dtype=int)
+    supertrend = np.zeros(n)
+
+    for i in range(n):
+        if i == 0:
+            final_upper[i] = basic_upper[i]
+            final_lower[i] = basic_lower[i]
+            trend[i] = 1
+            supertrend[i] = final_lower[i]
+        else:
+            # Upper band
+            if basic_upper[i] < final_upper[i - 1] or closes[i - 1] > final_upper[i - 1]:
+                final_upper[i] = basic_upper[i]
+            else:
+                final_upper[i] = final_upper[i - 1]
+
+            # Lower band
+            if basic_lower[i] > final_lower[i - 1] or closes[i - 1] < final_lower[i - 1]:
+                final_lower[i] = basic_lower[i]
+            else:
+                final_lower[i] = final_lower[i - 1]
+
+            # Trend direction
+            if supertrend[i - 1] == final_upper[i - 1]:
+                if closes[i] > final_upper[i]:
+                    trend[i] = 1
+                    supertrend[i] = final_lower[i]
+                else:
+                    trend[i] = -1
+                    supertrend[i] = final_upper[i]
+            else:
+                if closes[i] < final_lower[i]:
+                    trend[i] = -1
+                    supertrend[i] = final_upper[i]
+                else:
+                    trend[i] = 1
+                    supertrend[i] = final_lower[i]
+
+    return round(float(supertrend[-1]), 2), int(trend[-1])
 
 
 def compute_indicators(prior_day_1m: List[Dict[str, Any]], current_day_1m: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -169,6 +249,36 @@ def compute_indicators(prior_day_1m: List[Dict[str, Any]], current_day_1m: List[
     band_width = upper_band - lower_band
     pct_b_series = (closes - lower_band) / (band_width + 1e-9)
 
+    # EMA 50 & EMA 200
+    ema50_series = closes.ewm(span=50, adjust=False).mean()
+    ema200_series = closes.ewm(span=200, adjust=False).mean()
+
+    # MACD (12, 26, 9)
+    ema12_series = closes.ewm(span=12, adjust=False).mean()
+    ema26_series = closes.ewm(span=26, adjust=False).mean()
+    macd_series = ema12_series - ema26_series
+    macd_sig_series = macd_series.ewm(span=9, adjust=False).mean()
+    macd_hist_series = macd_series - macd_sig_series
+
+    # Donchian Channel (20 periods)
+    donchian_up_series = highs.rolling(window=20, min_periods=3).max()
+    donchian_lo_series = lows.rolling(window=20, min_periods=3).min()
+    donchian_mid_series = (donchian_up_series + donchian_lo_series) / 2.0
+
+    # Stochastic Oscillator (14, 3, 3)
+    stoch_low14 = lows.rolling(window=14, min_periods=3).min()
+    stoch_high14 = highs.rolling(window=14, min_periods=3).max()
+    stoch_denom = (stoch_high14 - stoch_low14).replace(0, 1e-9)
+    fast_k_series = 100.0 * (closes - stoch_low14) / stoch_denom
+    stoch_k_series = fast_k_series.rolling(window=3, min_periods=1).mean()
+    stoch_d_series = stoch_k_series.rolling(window=3, min_periods=1).mean()
+
+    # Volume 20 SMA
+    vol_sma_series = vols.rolling(window=20, min_periods=1).mean()
+
+    # Supertrend (10, 3)
+    st_val, st_dir = compute_supertrend(df_all, period=10, multiplier=3.0)
+
     # VWAP: Resets daily! Calculated strictly on current day's candles
     curr_tp = (df_curr_5m["high"] + df_curr_5m["low"] + df_curr_5m["close"]) / 3.0
     curr_cum_vol = df_curr_5m["volume"].cumsum()
@@ -182,10 +292,27 @@ def compute_indicators(prior_day_1m: List[Dict[str, Any]], current_day_1m: List[
     current_price = float(closes.iloc[-1])
     ema9_val = float(ema9_series.iloc[-1])
     ema21_val = float(ema21_series.iloc[-1])
+    ema50_val = float(ema50_series.iloc[-1])
+    ema200_val = float(ema200_series.iloc[-1])
     rsi_val = float(rsi_series.iloc[-1]) if not pd.isna(rsi_series.iloc[-1]) else 50.0
     atr_val = float(atr_series.iloc[-1]) if not pd.isna(atr_series.iloc[-1]) else 5.0
     pct_b_val = float(pct_b_series.iloc[-1]) if not pd.isna(pct_b_series.iloc[-1]) else 0.5
+    bb_upper_val = float(upper_band.iloc[-1]) if not pd.isna(upper_band.iloc[-1]) else current_price * 1.01
+    bb_lower_val = float(lower_band.iloc[-1]) if not pd.isna(lower_band.iloc[-1]) else current_price * 0.99
+    bb_mid_val = float(sma20.iloc[-1]) if not pd.isna(sma20.iloc[-1]) else current_price
     vwap_val = float(curr_vwap_series.iloc[-1])
+
+    macd_line_val = float(macd_series.iloc[-1])
+    macd_signal_val = float(macd_sig_series.iloc[-1])
+    macd_hist_val = float(macd_hist_series.iloc[-1])
+
+    donchian_up_val = float(donchian_up_series.iloc[-1]) if not pd.isna(donchian_up_series.iloc[-1]) else current_price
+    donchian_lo_val = float(donchian_lo_series.iloc[-1]) if not pd.isna(donchian_lo_series.iloc[-1]) else current_price
+    donchian_mid_val = float(donchian_mid_series.iloc[-1]) if not pd.isna(donchian_mid_series.iloc[-1]) else current_price
+
+    stoch_k_val = float(stoch_k_series.iloc[-1]) if not pd.isna(stoch_k_series.iloc[-1]) else 50.0
+    stoch_d_val = float(stoch_d_series.iloc[-1]) if not pd.isna(stoch_d_series.iloc[-1]) else 50.0
+    vol_sma_val = float(vol_sma_series.iloc[-1]) if not pd.isna(vol_sma_series.iloc[-1]) else 1000.0
 
     # Price 30 mins ago on 5m bars (6 bars ago)
     price_30m_ago = float(df_curr_5m["close"].iloc[-6]) if len(df_curr_5m) >= 6 else float(df_curr_5m["open"].iloc[0])
@@ -204,24 +331,51 @@ def compute_indicators(prior_day_1m: List[Dict[str, Any]], current_day_1m: List[
     vwap_sigma = compute_vwap_sigma_from_series(df_curr_5m, curr_vwap_series)
 
     # E: ADX14 computed on df_all (warmed up from prior day)
-    adx_val = compute_adx(df_all, period=14)
+    adx_res = compute_adx(df_all, period=14)
+    if isinstance(adx_res, tuple):
+        adx_val, pdi_val, mdi_val = adx_res
+    else:
+        adx_val = adx_res
+        pdi_val, mdi_val = 0.0, 0.0
 
     return {
         "price": current_price,
         "ema9": round(ema9_val, 2),
         "ema21": round(ema21_val, 2),
+        "ema50": round(ema50_val, 2),
+        "ema200": round(ema200_val, 2),
         "rsi": round(rsi_val, 1),
         "atr": round(atr_val, 2),
         "vwap": round(vwap_val, 2),
         "pct_b": round(pct_b_val, 3),
+        "bb_upper": round(bb_upper_val, 2),
+        "bb_lower": round(bb_lower_val, 2),
+        "bb_mid": round(bb_mid_val, 2),
+        "supertrend": round(st_val, 2),
+        "supertrend_dir": st_dir,
+        "macd_line": round(macd_line_val, 2),
+        "macd_signal": round(macd_signal_val, 2),
+        "macd_hist": round(macd_hist_val, 2),
+        "donchian_upper": round(donchian_up_val, 2),
+        "donchian_lower": round(donchian_lo_val, 2),
+        "donchian_mid": round(donchian_mid_val, 2),
+        "stoch_k": round(stoch_k_val, 1),
+        "stoch_d": round(stoch_d_val, 1),
+        "volume_sma": round(vol_sma_val, 0),
         "price_30m_ago": round(price_30m_ago, 2),
         "closes_below_vwap_count": closes_below_vwap,
         "bars_count": len(df_curr_5m),
         "vwap_sigma": round(vwap_sigma, 4),
         "adx": round(adx_val, 2),
+        "pdi": round(pdi_val, 2),
+        "mdi": round(mdi_val, 2),
         # Expose DataFrames for ORB/regime use (not serialized to JSON)
         "_df_curr_5m": df_curr_5m,
         "_vwap_series": curr_vwap_series,
+        "_closes_series": closes,
+        "_rsi_series": rsi_series,
+        "_ema9_series": ema9_series,
+        "_ema21_series": ema21_series,
     }
 
 

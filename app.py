@@ -15,6 +15,8 @@ from simulation.market_data import fetch_5min_candles, fetch_daily_ohlc, fetch_c
 from simulation.strategies.registry import list_all_strategies
 from simulation.agent_config import agent_config_manager
 from simulation.backtest import run_strategy_backtest
+from simulation.indicators import enrich_candles_with_all_indicators
+from simulation.live_market import live_market_manager
 
 app = Flask(__name__, static_folder="frontend/dist", static_url_path="")
 CORS(app)
@@ -45,6 +47,7 @@ def get_candles():
     if norm_tf != "5m":
         try:
             candles, is_real, data_banner = fetch_candles_by_timeframe(yf_symbol, norm_tf, resolved_date)
+            candles = enrich_candles_with_all_indicators(candles)
             return jsonify({
                 "status": "success",
                 "symbol": yf_symbol,
@@ -106,6 +109,8 @@ def get_candles():
                 "orb_high": round(orb_h, 2),
                 "orb_low": round(orb_l, 2)
             })
+
+        enriched_candles = enrich_candles_with_all_indicators(enriched_candles)
 
         return jsonify({
             "status": "success",
@@ -190,13 +195,71 @@ def update_simulation_speed():
 def get_state():
     return jsonify(engine.get_state())
 
-@app.route("/api/stream", methods=["GET"])
-def stream_state():
-    """Server-Sent Events (SSE) real-time stream of simulation state."""
+@app.route("/api/live/state", methods=["GET"])
+def get_live_state():
+    return jsonify(live_market_manager.get_state())
+
+@app.route("/api/live/start", methods=["POST"])
+def start_live_market():
+    data = request.get_json(silent=True) or {}
+    symbol = data.get("symbol")
+    if symbol:
+        live_market_manager.set_symbol(symbol)
+    live_market_manager.start()
+    return jsonify({"status": "started", "state": live_market_manager.get_state()})
+
+@app.route("/api/live/stop", methods=["POST"])
+def stop_live_market():
+    live_market_manager.stop()
+    return jsonify({"status": "stopped", "state": live_market_manager.get_state()})
+
+@app.route("/api/live/switch", methods=["POST"])
+def switch_live_symbol():
+    data = request.get_json(silent=True) or {}
+    symbol = data.get("symbol", "HDFCBANK")
+    live_market_manager.set_symbol(symbol)
+    return jsonify({"status": "switched", "symbol": live_market_manager.symbol, "state": live_market_manager.get_state()})
+
+@app.route("/api/live/order", methods=["POST"])
+def execute_live_order():
+    data = request.get_json(silent=True) or {}
+    side = data.get("side", "BUY").upper()
+    qty = int(data.get("qty", 1))
+    res = live_market_manager.execute_live_order(side=side, qty=qty)
+    return jsonify({"result": res, "state": live_market_manager.get_state()})
+
+@app.route("/api/live/stream", methods=["GET"])
+def stream_live_state():
+    """SSE real-time stream of live market state."""
     def event_stream():
         while True:
             try:
-                state = engine.get_state()
+                state = live_market_manager.get_state()
+                yield f"data: {json.dumps(state)}\n\n"
+            except Exception:
+                pass
+            time.sleep(0.5)
+    return Response(
+        event_stream(),
+        mimetype="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive"
+        }
+    )
+
+@app.route("/api/stream", methods=["GET"])
+def stream_state():
+    """Server-Sent Events (SSE) real-time stream of simulation or live market state."""
+    mode = request.args.get("mode", "").strip().lower()
+    def event_stream():
+        while True:
+            try:
+                if mode == "live" or (live_market_manager.is_running and not engine.is_running):
+                    state = live_market_manager.get_state()
+                else:
+                    state = engine.get_state()
                 yield f"data: {json.dumps(state)}\n\n"
             except Exception:
                 pass
@@ -233,6 +296,17 @@ def reset_agent_config():
     """Resets configuration to factory defaults."""
     resetted = agent_config_manager.reset_defaults()
     return jsonify({"status": "reset", "config": resetted})
+
+@app.route("/api/news-config", methods=["GET", "POST"])
+def news_config_endpoint():
+    """Gets or sets the news agent mode (Moneycontrol vs Previous RSS logic)."""
+    if request.method == "POST":
+        data = request.get_json(silent=True) or {}
+        use_mc = bool(data.get("use_moneycontrol", True))
+        updated = agent_config_manager.update_config({"agent2": {"use_moneycontrol": use_mc}})
+        return jsonify({"status": "updated", "use_moneycontrol": use_mc, "config": updated})
+    cfg = agent_config_manager.get_config().get("agent2", {})
+    return jsonify({"use_moneycontrol": cfg.get("use_moneycontrol", True)})
 
 @app.route("/api/market-indices", methods=["GET"])
 def get_market_indices():

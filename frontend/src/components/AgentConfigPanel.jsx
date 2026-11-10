@@ -236,6 +236,32 @@ export default function AgentConfigPanel({ onConfigUpdated }) {
               />
             </div>
 
+            {/* Moneycontrol vs Previous Logic Switch */}
+            <div className="flex items-center justify-between p-2.5 rounded-lg bg-[#141b29] border border-[#1f293d]">
+              <div>
+                <span className="text-white font-bold block text-xs">News Logic Engine:</span>
+                <span className="text-[10px] text-slate-400 block mt-0.5">
+                  {(agent2.use_moneycontrol ?? true)
+                    ? '⚡ Moneycontrol Live (Default YES • Sudden Shock HOLD/SELL)'
+                    : '🌐 Previous RSS Logic (Legacy Neutral Sentiment Thresholds)'}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setConfig({
+                  ...config,
+                  agent2: { ...agent2, use_moneycontrol: !(agent2.use_moneycontrol ?? true) }
+                })}
+                className={`px-3 py-1 rounded text-xs font-bold transition-all border ${
+                  (agent2.use_moneycontrol ?? true)
+                    ? 'bg-emerald-950 text-emerald-400 border-emerald-500 shadow-sm'
+                    : 'bg-slate-800 text-slate-400 border-slate-700'
+                }`}
+              >
+                {(agent2.use_moneycontrol ?? true) ? '🟢 Moneycontrol: ON' : '⚪ Previous Logic: ON'}
+              </button>
+            </div>
+
             {/* Critical Event Checkbox */}
             <div className="flex items-center justify-between p-2 rounded-lg bg-[#141b29] border border-[#1f293d]">
               <span className="text-slate-300">Veto on Critical Events (Fraud, Probe, SEBI Raid):</span>

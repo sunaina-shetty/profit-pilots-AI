@@ -30,6 +30,7 @@ DEFAULT_AGENT_CONFIG: Dict[str, Any] = {
         "id": "agent2",
         "name": "Agent 2 — News Intelligence",
         "enabled": True,
+        "use_moneycontrol": True,
         "weight": 0.30,
         "negative_veto_threshold": -0.50,
         "short_veto_threshold": 0.50,

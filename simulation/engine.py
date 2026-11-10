@@ -180,7 +180,14 @@ class SimulationEngine:
 
             self.set_speed(speed, fast_mode=fast_mode)
 
-            self.all_news = fetch_rss_headlines(self.symbol, self.date_str)
+            from simulation.news import fetch_moneycontrol_news
+            cfg_agent2 = agent_config_manager.get_config().get("agent2", {})
+            use_mc = cfg_agent2.get("use_moneycontrol", True)
+            if use_mc:
+                mc_news = fetch_moneycontrol_news(self.symbol, self.date_str)
+                self.all_news = mc_news if mc_news else fetch_rss_headlines(self.symbol, self.date_str)
+            else:
+                self.all_news = fetch_rss_headlines(self.symbol, self.date_str)
 
             # Reset Broker & Trackers
             self.broker = PaperBroker(self.initial_amount, self.symbol, self.stop_loss_pct)
@@ -773,7 +780,9 @@ class SimulationEngine:
             )
 
             # 3.2 Evaluate Agent 2 (News Sentiment & Event Classification)
-            news_res = evaluate_news_agent(self.all_news, sim_dt)
+            cfg_agent2 = agent_config_manager.get_config().get("agent2", {})
+            use_mc = cfg_agent2.get("use_moneycontrol", True)
+            news_res = evaluate_news_agent(self.all_news, sim_dt, default_yes=use_mc)
 
             # 3.3 Evaluate Agent 3 (Mean Reversion / Reversal with Configurable Strategy)
             rt_cost_pct = (compute_round_trip_cost(candle_close, 10) / (candle_close * 10)) if candle_close > 0 else 0.001

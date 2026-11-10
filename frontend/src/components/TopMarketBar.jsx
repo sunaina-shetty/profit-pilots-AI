@@ -12,7 +12,10 @@ export default function TopMarketBar({
   onStartSimulation,
   onOpenKillModal,
   activeTab,
-  setActiveTab
+  setActiveTab,
+  marketMode = 'SIMULATION',
+  onToggleMarketMode,
+  isLiveRunning = false
 }) {
   const [indices, setIndices] = useState([
     { name: 'NIFTY 50', value: 24997.30, change: 10.90, change_pct: 0.04, is_up: true },
@@ -57,6 +60,15 @@ export default function TopMarketBar({
   });
 
   const getStatusBadge = () => {
+    if (marketMode === 'LIVE') {
+      return (
+        <span className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-rose-950/80 text-rose-300 border border-rose-500/50 shadow-sm shadow-rose-950 animate-pulse">
+          <span className="w-2 h-2 rounded-full bg-rose-400 animate-ping" />
+          <span className="font-extrabold text-white">LIVE MARKET</span>
+          <span className="text-slate-300 font-mono text-[11px]">({state?.last_update || state?.simulated_time || 'ACTIVE'})</span>
+        </span>
+      );
+    }
     if (isRunning) {
       return (
         <span className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-950/80 text-emerald-400 border border-emerald-500/40 animate-pulse">
@@ -171,8 +183,37 @@ export default function TopMarketBar({
           )}
         </div>
 
-        {/* Right Controls: Balance, Kill Switch, User */}
+        {/* Right Controls: Mode Switcher, Status, Balance, Kill Switch */}
         <div className="flex items-center gap-3 shrink-0">
+          {/* Mode Switcher Pill */}
+          <div className="flex items-center bg-[#141b29] p-0.5 rounded-lg border border-[#1f293d]">
+            <button
+              type="button"
+              onClick={() => onToggleMarketMode && onToggleMarketMode('SIMULATION')}
+              className={`px-2.5 py-1 rounded text-xs font-bold transition-all flex items-center gap-1 ${
+                marketMode === 'SIMULATION'
+                  ? 'bg-amber-400 text-black font-extrabold shadow-sm shadow-amber-950'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-800'
+              }`}
+              title="Switch to Historical Simulation Mode"
+            >
+              <span>✈️ SIMULATION</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => onToggleMarketMode && onToggleMarketMode('LIVE')}
+              className={`px-2.5 py-1 rounded text-xs font-bold transition-all flex items-center gap-1.5 ${
+                marketMode === 'LIVE'
+                  ? 'bg-rose-600 text-white font-black shadow-sm shadow-rose-950 animate-pulse'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-800'
+              }`}
+              title="Switch to Real-Time Live Market Mode"
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping" />
+              <span>🔴 LIVE MARKET</span>
+            </button>
+          </div>
+
           {getStatusBadge()}
 
           {/* Virtual Balance pill */}

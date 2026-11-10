@@ -394,3 +394,89 @@ def _candle_list_to_df(candles: List[Dict[str, Any]]) -> pd.DataFrame:
             "volume": float(c.get("volume", 0)),
         })
     return pd.DataFrame(rows)
+
+
+def enrich_candles_with_all_indicators(candles: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Enriches all candles with indicators from all 10 trading strategies:
+    EMA9, EMA21, EMA50, EMA200, VWAP, Bollinger Bands (Upper, Mid, Lower),
+    Supertrend, Donchian Channels (High, Low), RSI 14, MACD, and Stochastic.
+    """
+    if not candles:
+        return []
+
+    try:
+        df = pd.DataFrame(candles)
+        closes = df["close"].astype(float)
+        highs = df["high"].astype(float)
+        lows = df["low"].astype(float)
+        vols = df["volume"].astype(float)
+
+        # 1. EMAs across multiple time windows (Strat 1, 2, 5, 10)
+        df["ema9"] = closes.ewm(span=9, adjust=False).mean().round(2)
+        df["ema21"] = closes.ewm(span=21, adjust=False).mean().round(2)
+        df["ema50"] = closes.ewm(span=50, adjust=False).mean().round(2)
+        df["ema200"] = closes.ewm(span=200, adjust=False).mean().round(2)
+
+        # 2. Bollinger Bands (20, 2) (Strat 6)
+        sma20 = closes.rolling(20, min_periods=1).mean()
+        std20 = closes.rolling(20, min_periods=1).std().fillna(0)
+        df["bb_upper"] = (sma20 + 2.0 * std20).round(2)
+        df["bb_middle"] = sma20.round(2)
+        df["bb_lower"] = (sma20 - 2.0 * std20).round(2)
+
+        # 3. Donchian Channels 20 (Strat 9)
+        df["donchian_high"] = highs.rolling(20, min_periods=1).max().round(2)
+        df["donchian_low"] = lows.rolling(20, min_periods=1).min().round(2)
+
+        # 4. RSI 14 (Strat 1, 5, 6, 8)
+        delta = closes.diff()
+        gain = delta.where(delta > 0, 0.0)
+        loss = -delta.where(delta < 0, 0.0)
+        ag = gain.ewm(alpha=1/14, min_periods=1).mean()
+        al = loss.ewm(alpha=1/14, min_periods=1).mean()
+        rs = ag / (al + 1e-9)
+        df["rsi14"] = (100.0 - (100.0 / (1.0 + rs))).round(2)
+
+        # 5. MACD (12, 26, 9) (Strat 5)
+        ema12 = closes.ewm(span=12, adjust=False).mean()
+        ema26 = closes.ewm(span=26, adjust=False).mean()
+        macd = ema12 - ema26
+        signal = macd.ewm(span=9, adjust=False).mean()
+        df["macd"] = macd.round(2)
+        df["macd_signal"] = signal.round(2)
+        df["macd_hist"] = (macd - signal).round(2)
+
+        # 6. Stochastic Oscillator (14, 3) (Strat 10)
+        l14 = lows.rolling(14, min_periods=1).min()
+        h14 = highs.rolling(14, min_periods=1).max()
+        k = 100.0 * (closes - l14) / (h14 - l14 + 1e-9)
+        df["stoch_k"] = k.round(2)
+        df["stoch_d"] = k.rolling(3, min_periods=1).mean().round(2)
+
+        # 7. VWAP (Strat 3 & Council)
+        typ = (highs + lows + closes) / 3.0
+        cum_vp = (typ * vols).cumsum()
+        cum_v = vols.cumsum()
+        df["vwap"] = (cum_vp / np.maximum(1.0, cum_v)).round(2)
+
+        # 8. Supertrend (Strat 2)
+        tr1 = highs - lows
+        tr2 = (highs - closes.shift(1).fillna(closes.iloc[0])).abs()
+        tr3 = (lows - closes.shift(1).fillna(closes.iloc[0])).abs()
+        tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+        atr = tr.rolling(10, min_periods=1).mean()
+        hl2 = (highs + lows) / 2.0
+        df["supertrend"] = (hl2 - 2.0 * atr).round(2)
+
+        # 9. ORB (Strat 4)
+        orb_h = float(highs.iloc[:3].max()) if len(highs) >= 3 else float(highs.iloc[0])
+        orb_l = float(lows.iloc[:3].min()) if len(lows) >= 3 else float(lows.iloc[0])
+        df["orb_high"] = round(orb_h, 2)
+        df["orb_low"] = round(orb_l, 2)
+
+        # Replace NaN with safe defaults
+        df = df.fillna(0.0)
+        return df.to_dict(orient="records")
+    except Exception:
+        return candles

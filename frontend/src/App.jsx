@@ -59,6 +59,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('terminal'); // 'terminal' | 'strategies' | 'agents' | 'portfolio' | 'orders' | 'signals' | 'news' | 'risk'
 
   // User Inputs
+  const [marketMode, setMarketMode] = useState('SIMULATION'); // 'SIMULATION' | 'LIVE'
   const [symbol, setSymbol] = useState('TCS');
   const [customSymbol, setCustomSymbol] = useState('');
   const [amount, setAmount] = useState(100000);
@@ -110,7 +111,7 @@ export default function App() {
 
   const activeSymbol = (symbol === 'CUSTOM' ? customSymbol : symbol) || 'TCS';
 
-  // Load stocks dropdown once
+  // Load stocks dropdown & agent configuration once
   useEffect(() => {
     fetch('/api/stocks')
       .then((r) => r.json())
@@ -118,7 +119,32 @@ export default function App() {
         if (data.stocks) setStocksList(data.stocks);
       })
       .catch((err) => console.error('Failed to load stock list:', err));
+
+    fetch('/api/agent-config')
+      .then((r) => r.json())
+      .then((data) => {
+        if (data) setState((prev) => ({ ...prev, agent_config: data }));
+      })
+      .catch(() => {});
   }, []);
+
+  const useMoneycontrol = state.agent_config?.agent2?.use_moneycontrol ?? true;
+
+  const handleToggleMoneycontrolNews = async (enable) => {
+    try {
+      const resp = await fetch('/api/news-config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ use_moneycontrol: enable })
+      });
+      const data = await resp.json();
+      if (data.config) {
+        setState((prev) => ({ ...prev, agent_config: data.config }));
+      }
+    } catch (err) {
+      console.warn('Failed to toggle news config:', err);
+    }
+  };
 
   // Fetch pre-START session preview candles whenever symbol or date changes
   useEffect(() => {
@@ -161,11 +187,12 @@ export default function App() {
     };
   }, [activeSymbol, selectedDate, timeframe, state.status]);
 
-  // Real-time EventSource SSE + Fallback Polling
+  // Real-time EventSource SSE + Fallback Polling (dynamic for Live vs Simulation)
   useEffect(() => {
     let eventSource = null;
+    const streamUrl = marketMode === 'LIVE' ? '/api/live/stream' : '/api/stream';
     try {
-      eventSource = new EventSource('/api/stream');
+      eventSource = new EventSource(streamUrl);
       eventSource.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
@@ -176,8 +203,9 @@ export default function App() {
       eventSource.onerror = () => {};
     } catch (e) {}
 
+    const pollUrl = marketMode === 'LIVE' ? '/api/live/state' : '/api/state';
     const poll = () => {
-      fetch('/api/state')
+      fetch(pollUrl)
         .then((r) => {
           if (!r.ok) throw new Error(`HTTP ${r.status}`);
           return r.json();
@@ -190,13 +218,64 @@ export default function App() {
     };
 
     poll();
-    const interval = setInterval(poll, 1000);
+    const interval = setInterval(poll, marketMode === 'LIVE' ? 1200 : 1000);
 
     return () => {
       if (eventSource) eventSource.close();
       clearInterval(interval);
     };
-  }, []);
+  }, [marketMode]);
+
+  const handleToggleMarketMode = async (mode) => {
+    setMarketMode(mode);
+    setApiError(null);
+    if (mode === 'LIVE') {
+      try {
+        const resp = await fetch('/api/live/start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ symbol: activeSymbol })
+        });
+        const data = await resp.json();
+        if (data.state) setState(data.state);
+      } catch (err) {
+        console.warn('Failed to start live stream:', err);
+      }
+    }
+  };
+
+  const handleSymbolChange = async (newSym) => {
+    setSymbol(newSym);
+    if (newSym !== 'CUSTOM') setCustomSymbol('');
+    if (marketMode === 'LIVE') {
+      try {
+        const clean = newSym === 'CUSTOM' ? customSymbol : newSym;
+        const resp = await fetch('/api/live/switch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ symbol: clean })
+        });
+        const data = await resp.json();
+        if (data.state) setState(data.state);
+      } catch (err) {
+        console.warn('Failed to switch live symbol:', err);
+      }
+    }
+  };
+
+  const handleLiveOrder = async (side) => {
+    try {
+      const resp = await fetch('/api/live/order', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ side, qty: 10 })
+      });
+      const data = await resp.json();
+      if (data.state) setState(data.state);
+    } catch (err) {
+      setApiError(String(err));
+    }
+  };
 
   const handleSpeedChange = async (newSpeed) => {
     setSimulationSpeed(newSpeed);
@@ -288,6 +367,16 @@ export default function App() {
 
   const isSimulationActive = isRunning || isKilled || isDone;
   const displayCandles = useMemo(() => {
+    if (marketMode === 'LIVE') {
+      const liveBars = (state.candles && state.candles.length > 0) ? state.candles : (state.closes_so_far || []);
+      if (liveBars.length > 0) {
+        if (timeframe === '5m') return liveBars;
+        if (timeframe === '15m') return resampleCandles(liveBars, 3);
+        if (timeframe === '1h') return resampleCandles(liveBars, 12);
+        return liveBars;
+      }
+      return previewCandles || [];
+    }
     if (!isSimulationActive) return previewCandles || [];
     const base = state.closes_so_far || [];
     if (timeframe === '5m') return base;
@@ -309,11 +398,15 @@ export default function App() {
       return previewCandles;
     }
     return base;
-  }, [isSimulationActive, state.closes_so_far, previewCandles, timeframe]);
-  const currentTimestamp = isSimulationActive && state.closes_so_far && state.closes_so_far.length > 0
-    ? state.closes_so_far[state.closes_so_far.length - 1].timestamp
-    : (previewCandles.length > 0 ? previewCandles[0].timestamp : null);
-  const currentSimTime = isSimulationActive ? state.simulated_time : (previewInfo?.first_candle_time || '09:15');
+  }, [marketMode, state.candles, isSimulationActive, state.closes_so_far, previewCandles, timeframe]);
+  const currentTimestamp = marketMode === 'LIVE' && state.candles && state.candles.length > 0
+    ? state.candles[state.candles.length - 1].timestamp
+    : (isSimulationActive && state.closes_so_far && state.closes_so_far.length > 0
+      ? state.closes_so_far[state.closes_so_far.length - 1].timestamp
+      : (previewCandles.length > 0 ? previewCandles[0].timestamp : null));
+  const currentSimTime = marketMode === 'LIVE'
+    ? (state.last_update || 'LIVE')
+    : (isSimulationActive ? state.simulated_time : (previewInfo?.first_candle_time || '09:15'));
 
   // Strategy Agents State
   const trend = state.latest_agents?.trend || {
@@ -379,10 +472,7 @@ export default function App() {
       {/* 1. TOP GROWW-INSPIRED MARKET BAR */}
       <TopMarketBar
         symbol={activeSymbol}
-        onSelectSymbol={(sym) => {
-          setSymbol(sym);
-          setCustomSymbol('');
-        }}
+        onSelectSymbol={handleSymbolChange}
         stocksList={stocksList}
         state={state}
         isRunning={isRunning}
@@ -392,6 +482,8 @@ export default function App() {
         onOpenKillModal={() => setShowKillModal(true)}
         activeTab={activeTab}
         setActiveTab={setActiveTab}
+        marketMode={marketMode}
+        onToggleMarketMode={handleToggleMarketMode}
       />
 
       {/* 2. MAIN WORKSPACE CONTENT BASED ON ACTIVE TAB */}
@@ -413,8 +505,7 @@ export default function App() {
           <MarketsOverview
             stocksList={stocksList}
             onSelectStockForTerminal={(sym) => {
-              setSymbol(sym);
-              setCustomSymbol('');
+              handleSymbolChange(sym);
               setActiveTab('terminal');
             }}
           />
@@ -424,149 +515,237 @@ export default function App() {
           <div className="flex flex-col lg:flex-row h-full">
             {/* Left Area: Controls + Chart + Agent Cards */}
             <div className="flex-1 p-3 sm:p-5 space-y-4 overflow-y-auto">
-              {/* Controls Bar */}
+              {/* Controls Bar (Adaptive for Live Market vs Simulation) */}
               <section className="bg-[#0f141f] border border-[#1f293d] rounded-xl p-3 sm:p-4 shadow-md">
-                <div className="flex flex-wrap items-end gap-3 sm:gap-4">
-                  {/* Stock Symbol Dropdown */}
-                  <div className="flex-1 min-w-[170px]">
-                    <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
-                      {t.symbolLabel}
-                    </label>
-                    <select
-                      disabled={isRunning}
-                      value={symbol}
-                      onChange={(e) => setSymbol(e.target.value)}
-                      className="w-full bg-[#161f30] border border-[#1f293d] rounded-lg px-3 py-1.5 text-xs font-bold text-white focus:outline-none focus:border-[#00c896] disabled:opacity-50"
-                    >
-                      {stocksList.map((s) => (
-                        <option key={s.symbol} value={s.symbol.replace('.NS', '')}>
-                          {s.display}
-                        </option>
-                      ))}
-                      <option value="CUSTOM">Custom Symbol...</option>
-                    </select>
-                  </div>
+                {marketMode === 'LIVE' ? (
+                  /* LIVE MARKET CONTROLS */
+                  <div className="flex flex-wrap items-end justify-between gap-3 sm:gap-4">
+                    <div className="flex flex-wrap items-end gap-3 sm:gap-4 flex-1">
+                      {/* Stock Symbol Dropdown for Live Market */}
+                      <div className="min-w-[180px]">
+                        <label className="block text-[11px] font-semibold text-rose-400 uppercase mb-1 flex items-center gap-1.5">
+                          <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-ping" />
+                          <span>Live Stock Symbol</span>
+                        </label>
+                        <select
+                          value={symbol}
+                          onChange={(e) => handleSymbolChange(e.target.value)}
+                          className="w-full bg-[#161f30] border border-rose-500/40 rounded-lg px-3 py-1.5 text-xs font-bold text-white focus:outline-none focus:border-rose-400"
+                        >
+                          {stocksList.map((s) => (
+                            <option key={s.symbol} value={s.symbol.replace('.NS', '')}>
+                              {s.display}
+                            </option>
+                          ))}
+                          <option value="CUSTOM">Custom Symbol...</option>
+                        </select>
+                      </div>
 
-                  {/* Custom Symbol Input if selected */}
-                  {symbol === 'CUSTOM' && (
-                    <div className="w-32">
+                      {symbol === 'CUSTOM' && (
+                        <div className="w-32">
+                          <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
+                            Symbol
+                          </label>
+                          <input
+                            type="text"
+                            placeholder="e.g. INFY"
+                            value={customSymbol}
+                            onChange={(e) => {
+                              setCustomSymbol(e.target.value.toUpperCase());
+                              handleSymbolChange(e.target.value.toUpperCase());
+                            }}
+                            className="w-full bg-[#161f30] border border-[#1f293d] rounded-lg px-3 py-1.5 text-xs font-bold text-white uppercase focus:outline-none focus:border-[#00c896]"
+                          />
+                        </div>
+                      )}
+
+                      {/* Live Data Injection Status Badge */}
+                      <div className="px-3 py-1.5 rounded-lg bg-rose-950/60 border border-rose-500/40 flex items-center gap-2">
+                        <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-pulse shadow-sm shadow-rose-500" />
+                        <div>
+                          <span className="text-[10px] font-bold text-rose-300 block uppercase tracking-wider">
+                            Live Stream Ingestion
+                          </span>
+                          <span className="text-xs font-mono font-bold text-white">
+                            {state.last_update || state.simulated_time || 'ACTIVE'} IST
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Instant Paper Trade Buttons (Zero Bot Fee) */}
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleLiveOrder('BUY')}
+                          className="px-4 py-2 rounded-lg bg-[#00c896] hover:bg-emerald-400 text-black font-extrabold text-xs shadow-lg shadow-emerald-950/40 transition-all active:scale-95 flex items-center gap-1.5"
+                          title="Execute instant live paper BUY order (0 bot fee)"
+                        >
+                          <span>▲ BUY (10 Qty)</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleLiveOrder('SELL')}
+                          className="px-4 py-2 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-extrabold text-xs shadow-lg shadow-rose-950/40 transition-all active:scale-95 flex items-center gap-1.5"
+                          title="Execute instant live paper SELL/FLATTEN order (0 bot fee)"
+                        >
+                          <span>▼ SELL / FLATTEN</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => handleToggleMarketMode('SIMULATION')}
+                      className="px-3 py-1.5 rounded-lg bg-[#141b29] hover:bg-slate-800 text-slate-300 text-xs font-bold border border-[#1f293d] transition-all flex items-center gap-1"
+                    >
+                      <span>✈️ Switch to Simulation</span>
+                    </button>
+                  </div>
+                ) : (
+                  /* SIMULATION CONTROLS */
+                  <div className="flex flex-wrap items-end gap-3 sm:gap-4">
+                    {/* Stock Symbol Dropdown */}
+                    <div className="flex-1 min-w-[170px]">
                       <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
-                        Symbol
+                        {t.symbolLabel}
+                      </label>
+                      <select
+                        disabled={isRunning}
+                        value={symbol}
+                        onChange={(e) => setSymbol(e.target.value)}
+                        className="w-full bg-[#161f30] border border-[#1f293d] rounded-lg px-3 py-1.5 text-xs font-bold text-white focus:outline-none focus:border-[#00c896] disabled:opacity-50"
+                      >
+                        {stocksList.map((s) => (
+                          <option key={s.symbol} value={s.symbol.replace('.NS', '')}>
+                            {s.display}
+                          </option>
+                        ))}
+                        <option value="CUSTOM">Custom Symbol...</option>
+                      </select>
+                    </div>
+
+                    {/* Custom Symbol Input if selected */}
+                    {symbol === 'CUSTOM' && (
+                      <div className="w-32">
+                        <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
+                          Symbol
+                        </label>
+                        <input
+                          type="text"
+                          disabled={isRunning}
+                          placeholder="e.g. INFY"
+                          value={customSymbol}
+                          onChange={(e) => setCustomSymbol(e.target.value.toUpperCase())}
+                          className="w-full bg-[#161f30] border border-[#1f293d] rounded-lg px-3 py-1.5 text-xs font-bold text-white uppercase focus:outline-none focus:border-[#00c896]"
+                        />
+                      </div>
+                    )}
+
+                    {/* Investment Amount */}
+                    <div className="w-36">
+                      <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
+                        {t.amountLabel}
                       </label>
                       <input
-                        type="text"
+                        type="number"
                         disabled={isRunning}
-                        placeholder="e.g. INFY"
-                        value={customSymbol}
-                        onChange={(e) => setCustomSymbol(e.target.value.toUpperCase())}
-                        className="w-full bg-[#161f30] border border-[#1f293d] rounded-lg px-3 py-1.5 text-xs font-bold text-white uppercase focus:outline-none focus:border-[#00c896]"
+                        step="10000"
+                        min="10000"
+                        max="100000000"
+                        value={amount}
+                        onChange={(e) => setAmount(Number(e.target.value))}
+                        className="w-full bg-[#161f30] border border-[#1f293d] rounded-lg px-3 py-1.5 text-xs font-mono font-bold text-white focus:outline-none focus:border-[#00c896] disabled:opacity-50"
                       />
                     </div>
-                  )}
 
-                  {/* Investment Amount */}
-                  <div className="w-36">
-                    <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
-                      {t.amountLabel}
-                    </label>
-                    <input
-                      type="number"
-                      disabled={isRunning}
-                      step="10000"
-                      min="10000"
-                      max="100000000"
-                      value={amount}
-                      onChange={(e) => setAmount(Number(e.target.value))}
-                      className="w-full bg-[#161f30] border border-[#1f293d] rounded-lg px-3 py-1.5 text-xs font-mono font-bold text-white focus:outline-none focus:border-[#00c896] disabled:opacity-50"
-                    />
-                  </div>
-
-                  {/* Stop-Loss % */}
-                  <div className="w-36">
-                    <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
-                      {t.stopLossLabel}
-                    </label>
-                    <input
-                      type="number"
-                      disabled={isRunning}
-                      step="0.1"
-                      min="0.3"
-                      max="5.0"
-                      value={stopLossPct}
-                      onChange={(e) => setStopLossPct(Number(e.target.value))}
-                      className="w-full bg-[#161f30] border border-[#1f293d] rounded-lg px-3 py-1.5 text-xs font-mono font-bold text-white focus:outline-none focus:border-[#00c896] disabled:opacity-50"
-                    />
-                  </div>
-
-                  {/* Trading Day Date Picker */}
-                  <div className="w-36">
-                    <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
-                      {t.dateLabel}
-                    </label>
-                    <input
-                      type="date"
-                      disabled={isRunning}
-                      value={selectedDate}
-                      onChange={(e) => setSelectedDate(e.target.value)}
-                      className="w-full bg-[#161f30] border border-[#1f293d] rounded-lg px-3 py-1.5 text-xs font-mono font-bold text-white focus:outline-none focus:border-[#00c896] disabled:opacity-50"
-                    />
-                  </div>
-
-                  {/* Simulation Speed Pill Buttons (with prominent 20x) */}
-                  <div className="flex flex-col">
-                    <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
-                      Speed
-                    </label>
-                    <div className="flex items-center bg-[#161f30] border border-[#1f293d] rounded-lg p-0.5 gap-0.5">
-                      {[
-                        { id: '1x', label: '1x' },
-                        { id: '5x', label: '5x' },
-                        { id: '10x', label: '10x' },
-                        { id: '20x', label: '20x' },
-                        { id: '50x', label: '50x' }
-                      ].map((sp) => {
-                        const isActive = simulationSpeed.toLowerCase() === sp.id.toLowerCase();
-                        const is20x = sp.id === '20x';
-                        return (
-                          <button
-                            key={sp.id}
-                            type="button"
-                            onClick={() => handleSpeedChange(sp.id)}
-                            className={`px-2 py-1 rounded text-xs font-extrabold transition-all flex items-center gap-0.5 ${
-                              isActive
-                                ? 'bg-amber-400 text-slate-950 shadow-sm shadow-amber-950 font-black'
-                                : is20x
-                                ? 'text-amber-400 font-bold hover:bg-[#1f293d]'
-                                : 'text-slate-400 hover:text-white hover:bg-[#1f293d]'
-                            }`}
-                            title={`Run simulation at ${sp.label} speed`}
-                          >
-                            {is20x && <span className="text-[10px]">⚡</span>}
-                            <span>{sp.label}</span>
-                          </button>
-                        );
-                      })}
+                    {/* Stop-Loss % */}
+                    <div className="w-36">
+                      <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
+                        {t.stopLossLabel}
+                      </label>
+                      <input
+                        type="number"
+                        disabled={isRunning}
+                        step="0.1"
+                        min="0.3"
+                        max="5.0"
+                        value={stopLossPct}
+                        onChange={(e) => setStopLossPct(Number(e.target.value))}
+                        className="w-full bg-[#161f30] border border-[#1f293d] rounded-lg px-3 py-1.5 text-xs font-mono font-bold text-white focus:outline-none focus:border-[#00c896] disabled:opacity-50"
+                      />
                     </div>
+
+                    {/* Trading Day Date Picker */}
+                    <div className="w-36">
+                      <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
+                        {t.dateLabel}
+                      </label>
+                      <input
+                        type="date"
+                        disabled={isRunning}
+                        value={selectedDate}
+                        onChange={(e) => setSelectedDate(e.target.value)}
+                        className="w-full bg-[#161f30] border border-[#1f293d] rounded-lg px-3 py-1.5 text-xs font-mono font-bold text-white focus:outline-none focus:border-[#00c896] disabled:opacity-50"
+                      />
+                    </div>
+
+                    {/* Simulation Speed Pill Buttons (with prominent 20x) */}
+                    <div className="flex flex-col">
+                      <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
+                        Speed
+                      </label>
+                      <div className="flex items-center bg-[#161f30] border border-[#1f293d] rounded-lg p-0.5 gap-0.5">
+                        {[
+                          { id: '1x', label: '1x' },
+                          { id: '5x', label: '5x' },
+                          { id: '10x', label: '10x' },
+                          { id: '20x', label: '20x' },
+                          { id: '50x', label: '50x' }
+                        ].map((sp) => {
+                          const isActive = simulationSpeed.toLowerCase() === sp.id.toLowerCase();
+                          const is20x = sp.id === '20x';
+                          return (
+                            <button
+                              key={sp.id}
+                              type="button"
+                              onClick={() => handleSpeedChange(sp.id)}
+                              className={`px-2 py-1 rounded text-xs font-extrabold transition-all flex items-center gap-0.5 ${
+                                isActive
+                                  ? 'bg-amber-400 text-slate-950 shadow-sm shadow-amber-950 font-black'
+                                  : is20x
+                                  ? 'text-amber-400 font-bold hover:bg-[#1f293d]'
+                                  : 'text-slate-400 hover:text-white hover:bg-[#1f293d]'
+                              }`}
+                              title={`Run simulation at ${sp.label} speed`}
+                            >
+                              {is20x && <span className="text-[10px]">⚡</span>}
+                              <span>{sp.label}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* START SIMULATION BUTTON */}
+                    <button
+                      disabled={isRunning}
+                      onClick={handleStart}
+                      className="px-5 py-2 rounded-lg bg-[#00c896] hover:bg-emerald-400 disabled:opacity-40 disabled:hover:bg-[#00c896] text-black font-extrabold text-xs shadow-lg shadow-emerald-950/40 transition-all active:scale-95 flex items-center gap-1.5"
+                    >
+                      <span>▶ {t.btnStart}</span>
+                    </button>
+
+                    {/* STOP ALL (KILL) BUTTON */}
+                    <button
+                      disabled={!isRunning}
+                      onClick={() => setShowKillModal(true)}
+                      className="px-4 py-2 rounded-lg bg-rose-600/90 hover:bg-rose-500 disabled:opacity-30 disabled:hover:bg-rose-600 text-white font-extrabold text-xs shadow-lg shadow-rose-950/40 transition-all active:scale-95 flex items-center gap-1.5"
+                    >
+                      <span>🛑 {t.btnKill}</span>
+                    </button>
                   </div>
-
-                  {/* START SIMULATION BUTTON */}
-                  <button
-                    disabled={isRunning}
-                    onClick={handleStart}
-                    className="px-5 py-2 rounded-lg bg-[#00c896] hover:bg-emerald-400 disabled:opacity-40 disabled:hover:bg-[#00c896] text-black font-extrabold text-xs shadow-lg shadow-emerald-950/40 transition-all active:scale-95 flex items-center gap-1.5"
-                  >
-                    <span>▶ {t.btnStart}</span>
-                  </button>
-
-                  {/* STOP ALL (KILL) BUTTON */}
-                  <button
-                    disabled={!isRunning}
-                    onClick={() => setShowKillModal(true)}
-                    className="px-4 py-2 rounded-lg bg-rose-600/90 hover:bg-rose-500 disabled:opacity-30 disabled:hover:bg-rose-600 text-white font-extrabold text-xs shadow-lg shadow-rose-950/40 transition-all active:scale-95 flex items-center gap-1.5"
-                  >
-                    <span>🛑 {t.btnKill}</span>
-                  </button>
-                </div>
+                )}
 
                 {apiError && (
                   <div className="mt-3 p-2 bg-rose-950/90 border border-rose-600 text-rose-300 text-xs rounded-lg font-mono">
@@ -575,7 +754,7 @@ export default function App() {
                 )}
               </section>
 
-              {/* Candlestick Chart */}
+              {/* Candlestick Chart with fx Indicators Dropdown */}
               <section className="bg-[#0f141f] border border-[#1f293d] rounded-xl p-3 sm:p-4 shadow-md space-y-3">
                 <CandlestickChart
                   candles={displayCandles}
@@ -603,10 +782,12 @@ export default function App() {
                   onSelectTimeframe={(tf) => setTimeframe(tf)}
                   simulationSpeed={simulationSpeed}
                   onSelectSpeed={handleSpeedChange}
+                  isLiveMode={marketMode === 'LIVE'}
+                  onExecuteOrder={handleLiveOrder}
                 />
               </section>
 
-              {/* 4 Agent Cards (Agent 1, Agent 2, Agent 3, Council Consensus Gate) */}
+              {/* 4 Agent Cards (Agent 1, Agent 2 Moneycontrol News, Agent 3, Council Consensus Gate) */}
               <section className="bg-[#0f141f] border border-[#1f293d] rounded-xl p-3 sm:p-4 shadow-md space-y-3">
                 <div className="flex items-center justify-between border-b border-[#1a2333] pb-2 text-xs">
                   <div className="font-bold text-white flex items-center gap-2">
@@ -616,7 +797,7 @@ export default function App() {
                     </span>
                   </div>
                   <span className="text-slate-400 font-mono text-[11px]">
-                    Replay Bar: {currentSimTime} IST
+                    {marketMode === 'LIVE' ? 'Live Stream Bar' : 'Replay Bar'}: {currentSimTime} IST
                   </span>
                 </div>
 
@@ -636,31 +817,68 @@ export default function App() {
                     </div>
                     <div className="text-[11px] text-slate-400 font-mono flex justify-between">
                       <span>Conviction:</span>
-                      <span className="text-white font-bold">{trend.score !== undefined ? `${trend.score > 0 ? '+' : ''}${trend.score.toFixed(2)}` : '0.00'}</span>
+                      <span className="text-white font-bold">{trend.score !== undefined ? `${trend.score > 0 ? '+' : ''}${Number(trend.score).toFixed(2)}` : '0.00'}</span>
                     </div>
                     <div className="text-[10px] text-slate-400 line-clamp-2 italic">
                       "{trend.reason || 'Scanning setup'}"
                     </div>
                   </div>
 
-                  {/* Agent 2 Card */}
+                  {/* Agent 2 Card: Switchable Moneycontrol (Default YES) vs Previous RSS Logic */}
                   <div className="p-3 rounded-lg bg-[#121824] border border-[#1a2333] space-y-1.5">
                     <div className="flex justify-between items-center">
-                      <span className="font-bold text-slate-200 text-xs">
-                        Agent 2: News
+                      <span className="font-bold text-slate-200 text-xs truncate">
+                        {useMoneycontrol ? 'Agent 2: Moneycontrol' : 'Agent 2: News (RSS)'}
                       </span>
+                      <button
+                        type="button"
+                        onClick={() => handleToggleMoneycontrolNews(!useMoneycontrol)}
+                        className={`px-1.5 py-0.5 rounded text-[9px] font-extrabold transition-all border ${
+                          useMoneycontrol
+                            ? 'bg-emerald-950 text-emerald-400 border-emerald-500 shadow-sm'
+                            : 'bg-slate-800 text-slate-300 border-slate-700 hover:text-white'
+                        }`}
+                        title="Click to toggle between Moneycontrol (Default YES) and Previous RSS logic"
+                      >
+                        {useMoneycontrol ? '⚡ MC: ON' : '🌐 RSS: ON'}
+                      </button>
+                    </div>
+
+                    <div className="flex justify-between items-center pt-0.5">
+                      <span className="text-[10px] text-slate-400">Verdict:</span>
                       <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                        news.veto_buy ? 'bg-rose-950 text-rose-400 border border-rose-500' : 'bg-sky-950 text-sky-400 border border-sky-500'
+                        useMoneycontrol
+                          ? (news.signal === 'BUY' || news.status === 'YES'
+                            ? 'bg-emerald-950 text-emerald-400 border border-emerald-500'
+                            : news.signal === 'SELL'
+                            ? 'bg-rose-950 text-rose-400 border border-rose-500 animate-pulse'
+                            : 'bg-amber-950 text-amber-400 border border-amber-500')
+                          : (news.signal === 'BUY'
+                            ? 'bg-emerald-950 text-emerald-400 border border-emerald-500'
+                            : news.signal === 'SELL'
+                            ? 'bg-rose-950 text-rose-400 border border-rose-500'
+                            : 'bg-slate-800 text-slate-400')
                       }`}>
-                        {news.veto_buy ? 'VETO' : (news.classification || 'NEUTRAL')}
+                        {useMoneycontrol
+                          ? (news.signal === 'BUY' || news.status === 'YES'
+                            ? 'YES (APPROVED)'
+                            : news.signal === 'SELL'
+                            ? 'SELL (SHOCK)'
+                            : 'HOLD (ADVERSE)')
+                          : (news.signal || news.classification || 'HOLD')}
                       </span>
                     </div>
+
                     <div className="text-[11px] text-slate-400 font-mono flex justify-between">
-                      <span>Sentiment:</span>
-                      <span className="text-white font-bold">{news.sentiment || '+0.00'}</span>
+                      <span>{useMoneycontrol ? 'Verdict / Conf:' : 'Sentiment:'}</span>
+                      <span className="text-white font-bold">
+                        {useMoneycontrol
+                          ? `${news.status || news.signal || 'YES'} • ${news.confidence || 65}%`
+                          : (news.sentiment || `${(news.score || 0) > 0 ? '+' : ''}${Number(news.score || 0).toFixed(2)}`)}
+                      </span>
                     </div>
                     <div className="text-[10px] text-slate-400 line-clamp-2 italic">
-                      "{news.reason || 'Monitoring news wires'}"
+                      "{news.reason || news.headline || (useMoneycontrol ? 'Moneycontrol Feed: Positive / Steady. Default YES active.' : 'Scanning standard RSS wires.')}"
                     </div>
                   </div>
 
@@ -761,7 +979,11 @@ export default function App() {
 
         {/* 8. NEWS INTELLIGENCE TAB */}
         {activeTab === 'news' && (
-          <NewsIntelligence state={state} />
+          <NewsIntelligence
+            state={state}
+            useMoneycontrol={useMoneycontrol}
+            onToggleMoneycontrol={() => handleToggleMoneycontrolNews(!useMoneycontrol)}
+          />
         )}
 
         {/* 9. RISK MANAGEMENT TAB */}

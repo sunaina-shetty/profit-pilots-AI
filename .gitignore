@@ -1,3 +1,29 @@
+# Dependencies
+node_modules/
+*/node_modules/
+frontend/node_modules/
+
+# Production builds
+dist/
+frontend/dist/
+
+# Environment files
 .env
 .env.*
 !.env.example
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+venv/
+.venv/
+env/
+
+# OS / Editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

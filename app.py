@@ -228,6 +228,26 @@ def execute_live_order():
     res = live_market_manager.execute_live_order(side=side, qty=qty)
     return jsonify({"result": res, "state": live_market_manager.get_state()})
 
+@app.route("/api/live/bot/start", methods=["POST"])
+def start_live_bot():
+    """Starts the multi-agent council automated trading bot in the live market."""
+    data = request.get_json(silent=True) or {}
+    symbol = data.get("symbol")
+    amount = float(data.get("amount", 100000.0))
+    stop_loss_pct = float(data.get("stop_loss_pct", 1.0))
+    if symbol:
+        live_market_manager.set_symbol(symbol)
+    res = live_market_manager.start_trade_bot(amount=amount, stop_loss_pct=stop_loss_pct)
+    return jsonify(res)
+
+@app.route("/api/live/bot/stop", methods=["POST"])
+def stop_live_bot():
+    """Stops the live trade bot and flattens or pauses new entries."""
+    data = request.get_json(silent=True) or {}
+    mode = data.get("mode", "flatten")
+    res = live_market_manager.stop_trade_bot(mode=mode)
+    return jsonify(res)
+
 @app.route("/api/live/stream", methods=["GET"])
 def stream_live_state():
     """SSE real-time stream of live market state."""
@@ -289,13 +309,29 @@ def update_agent_config():
     """Updates agent and strategy configuration."""
     patch = request.get_json() or {}
     updated = agent_config_manager.update_config(patch)
-    return jsonify({"status": "updated", "config": updated})
+    try:
+        live_state = live_market_manager.recalculate_strategies()
+    except Exception:
+        live_state = live_market_manager.get_state()
+    return jsonify({
+        "status": "updated",
+        "config": updated,
+        "live_state": live_state
+    })
 
 @app.route("/api/agent-config/reset", methods=["POST"])
 def reset_agent_config():
     """Resets configuration to factory defaults."""
     resetted = agent_config_manager.reset_defaults()
-    return jsonify({"status": "reset", "config": resetted})
+    try:
+        live_state = live_market_manager.recalculate_strategies()
+    except Exception:
+        live_state = live_market_manager.get_state()
+    return jsonify({
+        "status": "reset",
+        "config": resetted,
+        "live_state": live_state
+    })
 
 @app.route("/api/news-config", methods=["GET", "POST"])
 def news_config_endpoint():

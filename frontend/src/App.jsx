@@ -196,7 +196,11 @@ export default function App() {
       eventSource.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
-          setState(data);
+          setState((prev) => ({
+            ...prev,
+            ...data,
+            agent_config: data.agent_config || prev.agent_config
+          }));
           setApiError(null);
         } catch (e) {}
       };
@@ -211,7 +215,11 @@ export default function App() {
           return r.json();
         })
         .then((data) => {
-          setState(data);
+          setState((prev) => ({
+            ...prev,
+            ...data,
+            agent_config: data.agent_config || prev.agent_config
+          }));
           setApiError(null);
         })
         .catch(() => {});
@@ -264,6 +272,10 @@ export default function App() {
   };
 
   const handleLiveOrder = async (side) => {
+    if (state.is_market_open === false) {
+      setApiError("Live Market is currently closed. Live orders can only be placed during trading hours (09:15 AM - 03:30 PM IST, Mon-Fri). Switch to Simulation Mode to test anytime.");
+      return;
+    }
     try {
       const resp = await fetch('/api/live/order', {
         method: 'POST',
@@ -271,7 +283,11 @@ export default function App() {
         body: JSON.stringify({ side, qty: 10 })
       });
       const data = await resp.json();
-      if (data.state) setState(data.state);
+      if (data.result && data.result.status === "rejected") {
+        setApiError(data.result.reason);
+      } else if (data.state) {
+        setState(data.state);
+      }
     } catch (err) {
       setApiError(String(err));
     }
@@ -317,10 +333,34 @@ export default function App() {
     }
   };
 
+  const handleStartLiveBot = async () => {
+    setApiError(null);
+    try {
+      const resp = await fetch('/api/live/bot/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          symbol: activeSymbol,
+          amount: Number(amount),
+          stop_loss_pct: Number(stopLossPct)
+        })
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        setApiError(data.error || 'Failed to start live trade bot');
+      } else if (data.state) {
+        setState(data.state);
+      }
+    } catch (err) {
+      setApiError(String(err));
+    }
+  };
+
   const handleConfirmKill = async (mode = 'flatten') => {
     setShowKillModal(false);
     try {
-      const resp = await fetch('/api/kill', {
+      const url = marketMode === 'LIVE' ? '/api/live/bot/stop' : '/api/kill';
+      const resp = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ mode })
@@ -342,7 +382,11 @@ export default function App() {
       });
       const data = await res.json();
       if (data.config) {
-        setState((prev) => ({ ...prev, agent_config: data.config }));
+        setState((prev) => ({
+          ...prev,
+          agent_config: data.config,
+          ...(data.live_state || {})
+        }));
       }
     } catch (err) {
       console.error(err);
@@ -361,8 +405,9 @@ export default function App() {
     }
   };
 
-  const isRunning = state.status === 'RUNNING';
-  const isKilled = state.status === 'KILLED';
+  const isLiveBotRunning = state.bot_status === 'RUNNING';
+  const isRunning = marketMode === 'LIVE' ? isLiveBotRunning : (state.status === 'RUNNING');
+  const isKilled = state.status === 'KILLED' || state.bot_status === 'STOPPED';
   const isDone = state.status === 'DONE';
 
   const isSimulationActive = isRunning || isKilled || isDone;
@@ -494,7 +539,7 @@ export default function App() {
             state={state}
             symbol={activeSymbol}
             onNavigateToTab={(tabId) => setActiveTab(tabId)}
-            onStartSimulation={handleStart}
+            onStartSimulation={marketMode === 'LIVE' ? handleStartLiveBot : handleStart}
             onOpenKillModal={() => setShowKillModal(true)}
             isRunning={isRunning}
           />
@@ -516,91 +561,216 @@ export default function App() {
             {/* Left Area: Controls + Chart + Agent Cards */}
             <div className="flex-1 p-3 sm:p-5 space-y-4 overflow-y-auto">
               {/* Controls Bar (Adaptive for Live Market vs Simulation) */}
-              <section className="bg-[#0f141f] border border-[#1f293d] rounded-xl p-3 sm:p-4 shadow-md">
+              <section className="bg-[#0f141f] border border-[#1f293d] rounded-xl p-3 sm:p-4 shadow-md space-y-3">
                 {marketMode === 'LIVE' ? (
                   /* LIVE MARKET CONTROLS */
-                  <div className="flex flex-wrap items-end justify-between gap-3 sm:gap-4">
-                    <div className="flex flex-wrap items-end gap-3 sm:gap-4 flex-1">
-                      {/* Stock Symbol Dropdown for Live Market */}
-                      <div className="min-w-[180px]">
-                        <label className="block text-[11px] font-semibold text-rose-400 uppercase mb-1 flex items-center gap-1.5">
-                          <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-ping" />
-                          <span>Live Stock Symbol</span>
-                        </label>
-                        <select
-                          value={symbol}
-                          onChange={(e) => handleSymbolChange(e.target.value)}
-                          className="w-full bg-[#161f30] border border-rose-500/40 rounded-lg px-3 py-1.5 text-xs font-bold text-white focus:outline-none focus:border-rose-400"
+                  <div className="space-y-3">
+                    {/* Market Closed Notification Banner */}
+                    {state.is_market_open === false && (
+                      <div className="w-full bg-[#121926] border border-amber-500/40 rounded-lg p-2.5 flex flex-col sm:flex-row sm:items-center justify-between text-xs gap-3">
+                        <div className="flex items-center gap-2 text-amber-300">
+                          <span className="text-base">🌙</span>
+                          <div>
+                            <span className="font-extrabold uppercase tracking-wide">Live Market Is Closed:</span>
+                            <span className="text-slate-300 ml-1.5 font-normal">
+                              {state.market_status_message || 'Trading hours are 09:15 AM - 03:30 PM IST (Mon-Fri). Displaying official closing data from the last trading session.'}
+                            </span>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleToggleMarketMode('SIMULATION')}
+                          className="px-2.5 py-1 rounded bg-[#1e293b] hover:bg-slate-700 text-amber-300 font-bold border border-amber-500/30 whitespace-nowrap text-[11px] self-start sm:self-auto"
                         >
-                          {stocksList.map((s) => (
-                            <option key={s.symbol} value={s.symbol.replace('.NS', '')}>
-                              {s.display}
-                            </option>
-                          ))}
-                          <option value="CUSTOM">Custom Symbol...</option>
-                        </select>
+                          ✈️ Replay in Simulation
+                        </button>
                       </div>
+                    )}
 
-                      {symbol === 'CUSTOM' && (
-                        <div className="w-32">
+                    <div className="flex flex-wrap items-end justify-between gap-3 sm:gap-4">
+                      <div className="flex flex-wrap items-end gap-3 sm:gap-4 flex-1">
+                        {/* Stock Symbol Dropdown for Live Market */}
+                        <div className="min-w-[160px]">
+                          <label className="block text-[11px] font-semibold text-rose-400 uppercase mb-1 flex items-center gap-1.5">
+                            <span className={`w-1.5 h-1.5 rounded-full ${state.is_market_open ? 'bg-emerald-400 animate-ping' : 'bg-slate-500'}`} />
+                            <span>Live Stock</span>
+                          </label>
+                          <select
+                            disabled={state.bot_status === 'RUNNING'}
+                            value={symbol}
+                            onChange={(e) => handleSymbolChange(e.target.value)}
+                            className="w-full bg-[#161f30] border border-rose-500/40 rounded-lg px-3 py-1.5 text-xs font-bold text-white focus:outline-none focus:border-rose-400 disabled:opacity-50"
+                          >
+                            {stocksList.map((s) => (
+                              <option key={s.symbol} value={s.symbol.replace('.NS', '')}>
+                                {s.display}
+                              </option>
+                            ))}
+                            <option value="CUSTOM">Custom Symbol...</option>
+                          </select>
+                        </div>
+
+                        {symbol === 'CUSTOM' && (
+                          <div className="w-28">
+                            <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
+                              Symbol
+                            </label>
+                            <input
+                              type="text"
+                              disabled={state.bot_status === 'RUNNING'}
+                              placeholder="e.g. INFY"
+                              value={customSymbol}
+                              onChange={(e) => {
+                                setCustomSymbol(e.target.value.toUpperCase());
+                                handleSymbolChange(e.target.value.toUpperCase());
+                              }}
+                              className="w-full bg-[#161f30] border border-[#1f293d] rounded-lg px-3 py-1.5 text-xs font-bold text-white uppercase focus:outline-none focus:border-[#00c896] disabled:opacity-50"
+                            />
+                          </div>
+                        )}
+
+                        {/* Capital Amount */}
+                        <div className="w-28">
                           <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
-                            Symbol
+                            {t.amountLabel || 'Capital (₹)'}
                           </label>
                           <input
-                            type="text"
-                            placeholder="e.g. INFY"
-                            value={customSymbol}
-                            onChange={(e) => {
-                              setCustomSymbol(e.target.value.toUpperCase());
-                              handleSymbolChange(e.target.value.toUpperCase());
-                            }}
-                            className="w-full bg-[#161f30] border border-[#1f293d] rounded-lg px-3 py-1.5 text-xs font-bold text-white uppercase focus:outline-none focus:border-[#00c896]"
+                            type="number"
+                            disabled={state.bot_status === 'RUNNING'}
+                            step="10000"
+                            min="10000"
+                            max="100000000"
+                            value={amount}
+                            onChange={(e) => setAmount(Number(e.target.value))}
+                            className="w-full bg-[#161f30] border border-[#1f293d] rounded-lg px-3 py-1.5 text-xs font-mono font-bold text-white focus:outline-none focus:border-[#00c896] disabled:opacity-50"
                           />
                         </div>
-                      )}
 
-                      {/* Live Data Injection Status Badge */}
-                      <div className="px-3 py-1.5 rounded-lg bg-rose-950/60 border border-rose-500/40 flex items-center gap-2">
-                        <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-pulse shadow-sm shadow-rose-500" />
-                        <div>
-                          <span className="text-[10px] font-bold text-rose-300 block uppercase tracking-wider">
-                            Live Stream Ingestion
+                        {/* Stop-Loss % */}
+                        <div className="w-24">
+                          <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
+                            {t.stopLossLabel || 'SL %'}
+                          </label>
+                          <input
+                            type="number"
+                            disabled={state.bot_status === 'RUNNING'}
+                            step="0.1"
+                            min="0.3"
+                            max="5.0"
+                            value={stopLossPct}
+                            onChange={(e) => setStopLossPct(Number(e.target.value))}
+                            className="w-full bg-[#161f30] border border-[#1f293d] rounded-lg px-3 py-1.5 text-xs font-mono font-bold text-white focus:outline-none focus:border-[#00c896] disabled:opacity-50"
+                          />
+                        </div>
+
+                        {/* START LIVE TRADE BOT BUTTON */}
+                        <button
+                          type="button"
+                          disabled={state.bot_status === 'RUNNING'}
+                          onClick={handleStartLiveBot}
+                          className="px-4 py-2 rounded-lg bg-[#00c896] hover:bg-emerald-400 disabled:opacity-40 disabled:hover:bg-[#00c896] text-black font-extrabold text-xs shadow-lg shadow-emerald-950/40 transition-all active:scale-95 flex items-center gap-1.5"
+                          title="Start automated multi-agent trading bot on the live market"
+                        >
+                          <span>▶ Start Trade</span>
+                        </button>
+
+                        {/* STOP BOT / KILL BUTTON */}
+                        <button
+                          type="button"
+                          disabled={state.bot_status !== 'RUNNING'}
+                          onClick={() => setShowKillModal(true)}
+                          className="px-3.5 py-2 rounded-lg bg-rose-600/90 hover:bg-rose-500 disabled:opacity-30 disabled:hover:bg-rose-600 text-white font-extrabold text-xs shadow-lg shadow-rose-950/40 transition-all active:scale-95 flex items-center gap-1.5"
+                          title="Stop automated trading bot and manage open positions"
+                        >
+                          <span>🛑 Stop Bot</span>
+                        </button>
+
+                        {/* Bot Status Indicator */}
+                        <div className={`px-2.5 py-1.5 rounded-lg border flex items-center gap-1.5 ${
+                          state.bot_status === 'RUNNING'
+                            ? 'bg-emerald-950/70 border-emerald-500/50'
+                            : state.bot_status === 'PAUSED_NEW'
+                            ? 'bg-amber-950/70 border-amber-500/50'
+                            : 'bg-slate-900 border-slate-700'
+                        }`}>
+                          <span className={`w-2 h-2 rounded-full ${
+                            state.bot_status === 'RUNNING'
+                              ? 'bg-emerald-400 animate-pulse shadow-sm shadow-emerald-500'
+                              : state.bot_status === 'PAUSED_NEW'
+                              ? 'bg-amber-400'
+                              : 'bg-slate-500'
+                          }`} />
+                          <span className={`text-[10px] font-extrabold uppercase ${
+                            state.bot_status === 'RUNNING'
+                              ? 'text-emerald-300'
+                              : state.bot_status === 'PAUSED_NEW'
+                              ? 'text-amber-300'
+                              : 'text-slate-400'
+                          }`}>
+                            {state.bot_status === 'RUNNING'
+                              ? 'Live Bot Active'
+                              : state.bot_status === 'PAUSED_NEW'
+                              ? 'Bot Paused'
+                              : 'Bot Idle'}
                           </span>
-                          <span className="text-xs font-mono font-bold text-white">
-                            {state.last_update || state.simulated_time || 'ACTIVE'} IST
+                        </div>
+
+                        {/* Live Data Status Badge (Open vs Closed) */}
+                        <div className={`px-2.5 py-1.5 rounded-lg border flex items-center gap-1.5 ${
+                          state.is_market_open
+                            ? 'bg-emerald-950/40 border-emerald-500/30'
+                            : 'bg-slate-900 border-slate-700'
+                        }`}>
+                          <span className={`w-2 h-2 rounded-full ${
+                            state.is_market_open
+                              ? 'bg-emerald-400 animate-ping'
+                              : 'bg-slate-500'
+                          }`} />
+                          <span className="text-[10px] font-mono font-bold text-slate-300">
+                            {state.is_market_open
+                              ? `${state.last_update || 'ACTIVE'} IST`
+                              : `Closed: ${state.simulated_time || '15:30'} IST`}
                           </span>
+                        </div>
+
+                        {/* Instant Paper Trade Buttons (Zero Bot Fee) */}
+                        <div className="flex items-center gap-1 border-l border-slate-800 pl-2">
+                          <button
+                            type="button"
+                            onClick={() => handleLiveOrder('BUY')}
+                            className={`px-2.5 py-1.5 rounded-lg font-bold text-[11px] transition-all active:scale-95 ${
+                              state.is_market_open
+                                ? 'bg-emerald-800/80 hover:bg-emerald-700 text-emerald-100 border border-emerald-600/40'
+                                : 'bg-slate-800 text-slate-500 border border-slate-700'
+                            }`}
+                            title={state.is_market_open ? "Manual Paper BUY" : "Market Closed"}
+                          >
+                            <span>+BUY</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleLiveOrder('SELL')}
+                            className={`px-2.5 py-1.5 rounded-lg font-bold text-[11px] transition-all active:scale-95 ${
+                              state.is_market_open
+                                ? 'bg-rose-900/80 hover:bg-rose-800 text-rose-100 border border-rose-600/40'
+                                : 'bg-slate-800 text-slate-500 border border-slate-700'
+                            }`}
+                            title={state.is_market_open ? "Manual Paper SELL" : "Market Closed"}
+                          >
+                            <span>-SELL</span>
+                          </button>
                         </div>
                       </div>
 
-                      {/* Instant Paper Trade Buttons (Zero Bot Fee) */}
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => handleLiveOrder('BUY')}
-                          className="px-4 py-2 rounded-lg bg-[#00c896] hover:bg-emerald-400 text-black font-extrabold text-xs shadow-lg shadow-emerald-950/40 transition-all active:scale-95 flex items-center gap-1.5"
-                          title="Execute instant live paper BUY order (0 bot fee)"
-                        >
-                          <span>▲ BUY (10 Qty)</span>
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => handleLiveOrder('SELL')}
-                          className="px-4 py-2 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-extrabold text-xs shadow-lg shadow-rose-950/40 transition-all active:scale-95 flex items-center gap-1.5"
-                          title="Execute instant live paper SELL/FLATTEN order (0 bot fee)"
-                        >
-                          <span>▼ SELL / FLATTEN</span>
-                        </button>
-                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleToggleMarketMode('SIMULATION')}
+                        className="px-3 py-1.5 rounded-lg bg-[#141b29] hover:bg-slate-800 text-slate-300 text-xs font-bold border border-[#1f293d] transition-all flex items-center gap-1"
+                      >
+                        <span>✈️ Switch to Simulation</span>
+                      </button>
                     </div>
-
-                    <button
-                      type="button"
-                      onClick={() => handleToggleMarketMode('SIMULATION')}
-                      className="px-3 py-1.5 rounded-lg bg-[#141b29] hover:bg-slate-800 text-slate-300 text-xs font-bold border border-[#1f293d] transition-all flex items-center gap-1"
-                    >
-                      <span>✈️ Switch to Simulation</span>
-                    </button>
                   </div>
                 ) : (
                   /* SIMULATION CONTROLS */

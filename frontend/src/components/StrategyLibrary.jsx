@@ -8,6 +8,18 @@ export default function StrategyLibrary({ onAssignStrategy, activeAgent1StratId,
   const [customParams, setCustomParams] = useState({});
   const [saveSuccess, setSaveSuccess] = useState('');
 
+  // Local active strategy state for instantaneous feedback
+  const [localA1, setLocalA1] = useState(activeAgent1StratId || 'strat_orb');
+  const [localA3, setLocalA3] = useState(activeAgent3StratId || 'strat_bb_rsi_reversal');
+
+  useEffect(() => {
+    if (activeAgent1StratId) setLocalA1(activeAgent1StratId);
+  }, [activeAgent1StratId]);
+
+  useEffect(() => {
+    if (activeAgent3StratId) setLocalA3(activeAgent3StratId);
+  }, [activeAgent3StratId]);
+
   const loadStrategies = () => {
     fetch('/api/strategies')
       .then((r) => r.json())
@@ -25,6 +37,17 @@ export default function StrategyLibrary({ onAssignStrategy, activeAgent1StratId,
     setSelectedStrat(strat);
     setCustomParams({ ...(strat.params || strat.default_params || {}) });
     setModalOpen(true);
+  };
+
+  const handleAssign = (agentKey, strat) => {
+    if (agentKey === 'agent1') setLocalA1(strat.id);
+    if (agentKey === 'agent3') setLocalA3(strat.id);
+    if (onAssignStrategy) {
+      onAssignStrategy(agentKey, strat.id);
+    }
+    const agentNum = agentKey === 'agent1' ? '1 (Trend)' : '3 (Reversal)';
+    setSaveSuccess(`Agent ${agentNum} strategy set to ${strat.name}`);
+    setTimeout(() => setSaveSuccess(''), 3500);
   };
 
   const handleSaveParams = async () => {
@@ -97,8 +120,8 @@ export default function StrategyLibrary({ onAssignStrategy, activeAgent1StratId,
       {/* Strategies Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {strategies.map((st) => {
-          const isAgent1Active = st.id === activeAgent1StratId;
-          const isAgent3Active = st.id === activeAgent3StratId;
+          const isAgent1Active = st.id === (activeAgent1StratId || localA1);
+          const isAgent3Active = st.id === (activeAgent3StratId || localA3);
 
           return (
             <div
@@ -170,25 +193,25 @@ export default function StrategyLibrary({ onAssignStrategy, activeAgent1StratId,
 
                 <div className="flex items-center gap-1.5">
                   <button
-                    onClick={() => onAssignStrategy('agent1', st.id)}
-                    className={`px-2 py-1 rounded-lg text-xs font-bold transition-all ${
+                    onClick={() => handleAssign('agent1', st)}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
                       isAgent1Active
-                        ? 'bg-[#00c896] text-black font-extrabold'
+                        ? 'bg-[#00c896] text-black font-extrabold shadow-md shadow-emerald-950/40'
                         : 'bg-[#1a2333] hover:bg-[#00c896]/20 text-slate-300 hover:text-[#00c896] border border-[#1f293d]'
                     }`}
                   >
-                    Set Agent 1
+                    {isAgent1Active ? '✓ Agent 1' : 'Set Agent 1'}
                   </button>
 
                   <button
-                    onClick={() => onAssignStrategy('agent3', st.id)}
-                    className={`px-2 py-1 rounded-lg text-xs font-bold transition-all ${
+                    onClick={() => handleAssign('agent3', st)}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
                       isAgent3Active
-                        ? 'bg-purple-600 text-white font-extrabold'
+                        ? 'bg-purple-600 text-white font-extrabold shadow-md shadow-purple-950/40'
                         : 'bg-[#1a2333] hover:bg-purple-600/20 text-slate-300 hover:text-purple-400 border border-[#1f293d]'
                     }`}
                   >
-                    Set Agent 3
+                    {isAgent3Active ? '✓ Agent 3' : 'Set Agent 3'}
                   </button>
                 </div>
               </div>

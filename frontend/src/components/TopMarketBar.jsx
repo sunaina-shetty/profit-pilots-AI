@@ -61,13 +61,24 @@ export default function TopMarketBar({
 
   const getStatusBadge = () => {
     if (marketMode === 'LIVE') {
-      return (
-        <span className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-rose-950/80 text-rose-300 border border-rose-500/50 shadow-sm shadow-rose-950 animate-pulse">
-          <span className="w-2 h-2 rounded-full bg-rose-400 animate-ping" />
-          <span className="font-extrabold text-white">LIVE MARKET</span>
-          <span className="text-slate-300 font-mono text-[11px]">({state?.last_update || state?.simulated_time || 'ACTIVE'})</span>
-        </span>
-      );
+      const isOpen = state?.is_market_open ?? false;
+      if (isOpen) {
+        return (
+          <span className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-950/80 text-emerald-300 border border-emerald-500/50 shadow-sm shadow-emerald-950">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+            <span className="font-extrabold text-white">LIVE MARKET (OPEN)</span>
+            <span className="text-slate-300 font-mono text-[11px]">({state?.last_update || '09:15 - 15:30'})</span>
+          </span>
+        );
+      } else {
+        return (
+          <span className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-slate-900 text-slate-300 border border-slate-700 shadow-sm">
+            <span className="w-2 h-2 rounded-full bg-slate-500" />
+            <span className="font-extrabold text-slate-200">LIVE MARKET (CLOSED)</span>
+            <span className="text-slate-400 font-mono text-[11px]">(Opens Mon-Fri 09:15 IST)</span>
+          </span>
+        );
+      }
     }
     if (isRunning) {
       return (
@@ -273,10 +284,17 @@ export default function TopMarketBar({
             <span>Low: <strong className="text-slate-200">₹{Number(quote.day_low || 0).toFixed(2)}</strong></span>
             <span>Prev Close: <strong className="text-slate-200">₹{Number(quote.prev_close || 0).toFixed(2)}</strong></span>
             <span>Vol: <strong className="text-slate-200">{Number(quote.volume || 0).toLocaleString('en-IN')}</strong></span>
-            <span className="flex items-center gap-1 text-[10px] text-emerald-400 font-sans">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-              Market Open
-            </span>
+            {state?.is_market_open ? (
+              <span className="flex items-center gap-1 text-[10px] text-emerald-400 font-sans">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                Market Open
+              </span>
+            ) : (
+              <span className="flex items-center gap-1 text-[10px] text-slate-400 font-sans">
+                <span className="w-1.5 h-1.5 rounded-full bg-slate-500" />
+                Market Closed
+              </span>
+            )}
           </div>
         )}
       </div>

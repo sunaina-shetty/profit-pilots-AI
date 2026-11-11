@@ -56,7 +56,7 @@ def evaluate_orb_vwap_agent(
         }
 
     current_bar = candles_5m_today[-1]
-    current_time = current_bar.get("time", "09:15")
+    current_time = str(current_bar.get("time_str") or current_bar.get("time") or "09:15")
     close = float(current_bar.get("close", 0.0))
     vwap = float(indicators.get("vwap", close))
     atr = float(indicators.get("atr", 0.0))

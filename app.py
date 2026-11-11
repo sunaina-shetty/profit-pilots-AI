@@ -19,13 +19,28 @@ from simulation.indicators import enrich_candles_with_all_indicators
 from simulation.live_market import live_market_manager
 
 app = Flask(__name__, static_folder="frontend/dist", static_url_path="")
-CORS(app)
+CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
+
+@app.route("/health", methods=["GET"])
+@app.route("/api/health", methods=["GET"])
+def health_check():
+    """Health check endpoint for Render, monitoring, and uptime probes."""
+    return jsonify({
+        "status": "healthy",
+        "service": "profit-pilots-ai-backend",
+        "timestamp": datetime.datetime.utcnow().isoformat()
+    }), 200
 
 @app.route("/", methods=["GET"])
 def index():
     if app.static_folder and os.path.exists(os.path.join(app.static_folder, "index.html")):
         return app.send_static_file("index.html")
-    return jsonify({"message": "ProfitPilot AI API running. Start frontend on :5173 or run npm run build in frontend/."})
+    return jsonify({
+        "name": "ProfitPilot AI Backend",
+        "status": "online",
+        "health": "/health",
+        "docs": "Multi-agent autonomous paper-trading engine (NSE / BSE)"
+    })
 
 @app.route("/api/stocks", methods=["GET"])
 def get_stocks():

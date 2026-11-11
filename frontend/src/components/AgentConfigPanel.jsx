@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Sliders, Save, RotateCcw, Shield, Newspaper, TrendingUp, Zap, HelpCircle } from 'lucide-react';
+import { getApiUrl } from '../utils/api';
 
 export default function AgentConfigPanel({ onConfigUpdated }) {
   const [config, setConfig] = useState(null);
@@ -10,8 +11,8 @@ export default function AgentConfigPanel({ onConfigUpdated }) {
   const loadData = async () => {
     try {
       const [resCfg, resStrats] = await Promise.all([
-        fetch('/api/agent-config').then((r) => r.json()),
-        fetch('/api/strategies').then((r) => r.json())
+        fetch(getApiUrl('/api/agent-config')).then((r) => r.json()),
+        fetch(getApiUrl('/api/strategies')).then((r) => r.json())
       ]);
       setConfig(resCfg);
       if (resStrats.strategies) setStrategies(resStrats.strategies);
@@ -29,7 +30,7 @@ export default function AgentConfigPanel({ onConfigUpdated }) {
     setIsSaving(true);
     setStatusMsg({ type: '', text: '' });
     try {
-      const res = await fetch('/api/agent-config', {
+      const res = await fetch(getApiUrl('/api/agent-config'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(config)
@@ -53,7 +54,7 @@ export default function AgentConfigPanel({ onConfigUpdated }) {
   const handleReset = async () => {
     if (!window.confirm('Reset all agent and strategy configurations to factory defaults?')) return;
     try {
-      const res = await fetch('/api/agent-config/reset', { method: 'POST' });
+      const res = await fetch(getApiUrl('/api/agent-config/reset'), { method: 'POST' });
       const data = await res.json();
       if (res.ok) {
         setConfig(data.config);

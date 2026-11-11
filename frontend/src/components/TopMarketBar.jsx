@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Search, ShieldAlert, ArrowUpRight, ArrowDownRight, Activity, Clock, AlertTriangle, Layers } from 'lucide-react';
+import { getApiUrl } from '../utils/api';
 
 export default function TopMarketBar({
   symbol,
@@ -31,7 +32,7 @@ export default function TopMarketBar({
 
   // Load top indices
   useEffect(() => {
-    fetch('/api/market-indices')
+    fetch(getApiUrl('/api/market-indices'))
       .then((r) => r.json())
       .then((data) => {
         if (data.indices && data.indices.length > 0) {
@@ -44,7 +45,7 @@ export default function TopMarketBar({
   // Fetch detailed stock quote whenever symbol changes
   useEffect(() => {
     if (!symbol) return;
-    fetch(`/api/stock-quote?symbol=${encodeURIComponent(symbol)}`)
+    fetch(getApiUrl(`/api/stock-quote?symbol=${encodeURIComponent(symbol)}`))
       .then((r) => r.json())
       .then((data) => {
         setQuote(data);

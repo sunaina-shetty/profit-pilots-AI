@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Sliders, CheckCircle2, TrendingUp, Zap, HelpCircle, ArrowRight, ShieldCheck, Settings2 } from 'lucide-react';
+import { getApiUrl } from '../utils/api';
 
 export default function StrategyLibrary({ onAssignStrategy, activeAgent1StratId, activeAgent3StratId }) {
   const [strategies, setStrategies] = useState([]);
@@ -21,7 +22,7 @@ export default function StrategyLibrary({ onAssignStrategy, activeAgent1StratId,
   }, [activeAgent3StratId]);
 
   const loadStrategies = () => {
-    fetch('/api/strategies')
+    fetch(getApiUrl('/api/strategies'))
       .then((r) => r.json())
       .then((d) => {
         if (d.strategies) setStrategies(d.strategies);
@@ -63,7 +64,7 @@ export default function StrategyLibrary({ onAssignStrategy, activeAgent1StratId,
       }
 
       if (Object.keys(patch).length > 0) {
-        await fetch('/api/agent-config', {
+        await fetch(getApiUrl('/api/agent-config'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(patch),

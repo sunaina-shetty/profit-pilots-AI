@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Play, TrendingUp, TrendingDown, DollarSign, Activity, Percent, ShieldCheck, AlertCircle, ArrowUpRight, ArrowDownRight, Layers } from 'lucide-react';
+import { getApiUrl } from '../utils/api';
 
 export default function Backtesting({ stocksList = [], onSelectSymbol, onOpenTerminalWithSymbol }) {
   const [symbol, setSymbol] = useState('TCS');
@@ -30,7 +31,7 @@ export default function Backtesting({ stocksList = [], onSelectSymbol, onOpenTer
     setIsLoading(true);
     setError(null);
     try {
-      const resp = await fetch('/api/backtest', {
+      const resp = await fetch(getApiUrl('/api/backtest'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

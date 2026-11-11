@@ -1,0 +1,11 @@
+{
+  "name": "profit-pilots-ai",
+  "version": "1.0.0",
+  "private": true,
+  "description": "ProfitPilot AI - Autonomous multi-agent quantitative paper-trading terminal and live trading bot for NSE/BSE",
+  "scripts": {
+    "build": "cd frontend && npm install && npm run build",
+    "start": "python app.py"
+  }
+}
+

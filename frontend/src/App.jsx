@@ -14,6 +14,7 @@ import MarketsOverview from './components/MarketsOverview';
 import Backtesting from './components/Backtesting';
 import SettingsPanel from './components/SettingsPanel';
 import { translations } from './i18n';
+import { getApiUrl } from './utils/api';
 
 // Format Indian Currency
 function formatINR(val) {
@@ -113,14 +114,14 @@ export default function App() {
 
   // Load stocks dropdown & agent configuration once
   useEffect(() => {
-    fetch('/api/stocks')
+    fetch(getApiUrl('/api/stocks'))
       .then((r) => r.json())
       .then((data) => {
         if (data.stocks) setStocksList(data.stocks);
       })
       .catch((err) => console.error('Failed to load stock list:', err));
 
-    fetch('/api/agent-config')
+    fetch(getApiUrl('/api/agent-config'))
       .then((r) => r.json())
       .then((data) => {
         if (data) setState((prev) => ({ ...prev, agent_config: data }));
@@ -132,7 +133,7 @@ export default function App() {
 
   const handleToggleMoneycontrolNews = async (enable) => {
     try {
-      const resp = await fetch('/api/news-config', {
+      const resp = await fetch(getApiUrl('/api/news-config'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ use_moneycontrol: enable })
@@ -156,7 +157,7 @@ export default function App() {
 
     const targetDateParam = selectedDate ? `&date=${selectedDate}` : '';
     const tfParam = `&timeframe=${encodeURIComponent(timeframe)}`;
-    fetch(`/api/candles?symbol=${encodeURIComponent(activeSymbol)}${targetDateParam}${tfParam}`)
+    fetch(getApiUrl(`/api/candles?symbol=${encodeURIComponent(activeSymbol)}${targetDateParam}${tfParam}`))
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.json();
@@ -192,7 +193,7 @@ export default function App() {
     let eventSource = null;
     const streamUrl = marketMode === 'LIVE' ? '/api/live/stream' : '/api/stream';
     try {
-      eventSource = new EventSource(streamUrl);
+      eventSource = new EventSource(getApiUrl(streamUrl));
       eventSource.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
@@ -209,7 +210,7 @@ export default function App() {
 
     const pollUrl = marketMode === 'LIVE' ? '/api/live/state' : '/api/state';
     const poll = () => {
-      fetch(pollUrl)
+      fetch(getApiUrl(pollUrl))
         .then((r) => {
           if (!r.ok) throw new Error(`HTTP ${r.status}`);
           return r.json();
@@ -239,7 +240,7 @@ export default function App() {
     setApiError(null);
     if (mode === 'LIVE') {
       try {
-        const resp = await fetch('/api/live/start', {
+        const resp = await fetch(getApiUrl('/api/live/start'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ symbol: activeSymbol })
@@ -258,7 +259,7 @@ export default function App() {
     if (marketMode === 'LIVE') {
       try {
         const clean = newSym === 'CUSTOM' ? customSymbol : newSym;
-        const resp = await fetch('/api/live/switch', {
+        const resp = await fetch(getApiUrl('/api/live/switch'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ symbol: clean })
@@ -277,7 +278,7 @@ export default function App() {
       return;
     }
     try {
-      const resp = await fetch('/api/live/order', {
+      const resp = await fetch(getApiUrl('/api/live/order'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ side, qty: 10 })
@@ -297,7 +298,7 @@ export default function App() {
     setSimulationSpeed(newSpeed);
     if (state.status === 'RUNNING') {
       try {
-        await fetch('/api/speed', {
+        await fetch(getApiUrl('/api/speed'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ speed: newSpeed })
@@ -311,7 +312,7 @@ export default function App() {
   const handleStart = async () => {
     setApiError(null);
     try {
-      const resp = await fetch('/api/start', {
+      const resp = await fetch(getApiUrl('/api/start'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -336,7 +337,7 @@ export default function App() {
   const handleStartLiveBot = async () => {
     setApiError(null);
     try {
-      const resp = await fetch('/api/live/bot/start', {
+      const resp = await fetch(getApiUrl('/api/live/bot/start'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -360,7 +361,7 @@ export default function App() {
     setShowKillModal(false);
     try {
       const url = marketMode === 'LIVE' ? '/api/live/bot/stop' : '/api/kill';
-      const resp = await fetch(url, {
+      const resp = await fetch(getApiUrl(url), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ mode })
@@ -375,7 +376,7 @@ export default function App() {
   const handleAssignStrategy = async (agentKey, strategyId) => {
     try {
       const patch = { [agentKey]: { strategy_id: strategyId } };
-      const res = await fetch('/api/agent-config', {
+      const res = await fetch(getApiUrl('/api/agent-config'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(patch)
@@ -395,7 +396,7 @@ export default function App() {
 
   const handleResetConfig = async () => {
     try {
-      const res = await fetch('/api/agent-config/reset', { method: 'POST' });
+      const res = await fetch(getApiUrl('/api/agent-config/reset'), { method: 'POST' });
       const data = await res.json();
       if (data.config) {
         setState((prev) => ({ ...prev, agent_config: data.config }));

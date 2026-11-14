@@ -1,6 +1,6 @@
 # ProfitPilot AI ✈️
 > **Groww-Inspired Multi-Agent Algorithmic Trading Terminal**  
-> Problem Statement **PS-02**: Institutional Multi-Agent Intraday Algorithmic Trading Terminal.
+> Problem Statement Institutional Multi-Agent Intraday Algorithmic Trading Terminal.
 
 ---
 
